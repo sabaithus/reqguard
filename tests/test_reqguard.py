@@ -755,3 +755,44 @@ def test_web_ui_server_endpoints_and_analysis_job(tmp_path: Path) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_deduplicator_preserves_f2_acceptance_conflict_alongside_goal_bpmn_conflict() -> None:
+    from reqguard.models import SetDefect, SourceSpan
+    from reqguard.verifier import _deduplicate_set
+
+    goal_bpmn_f2 = SetDefect(
+        defect_id="TMP-1",
+        title="Конфликт между разделом Цели, BPMN-схемой и Ф-2 по срокам начисления кэшбэка",
+        criterion="CONSISTENT",
+        severity="CRITICAL",
+        related_req_ids=["Цели", "BPMN", "Ф-2"],
+        problem="В Целях указано моментально, в BPMN через 3 дня, а в Ф-2 — до 5 числа следующего месяца.",
+        impact="Невозможно однозначно реализовать начисление кэшбэка.",
+        question_for_analyst="Какой срок начисления является целевым?",
+        recommendation="Согласовать единый срок начисления кэшбэка во всех разделах.",
+        origin="LLM",
+        evidence=[
+            SourceSpan(section_path="Цели", line_start=12, line_end=12, quote="моментально", verified=True),
+            SourceSpan(section_path="BPMN", line_start=25, line_end=25, quote="через 3 дня", verified=True),
+            SourceSpan(section_path="Ф-2", line_start=38, line_end=38, quote="до 5 числа", verified=True),
+        ],
+    )
+    f2_acceptance = SetDefect(
+        defect_id="TMP-2",
+        title="Противоречие между Ф-2 и Критериями приёмки по дате выплаты кэшбэка",
+        criterion="CONSISTENT",
+        severity="CRITICAL",
+        related_req_ids=["Ф-2", "Приёмка"],
+        problem="В Ф-2 срок выплаты — 5 число следующего месяца, а в Приёмке — 31 января / 1 февраля.",
+        impact="Приёмочное тестирование не сойдётся с бизнес-логикой.",
+        question_for_analyst="Какая дата выплаты приоритетна: 5-е число или конец месяца?",
+        recommendation="Устранить расхождение между Ф-2 и разделом Критерии приёмки.",
+        origin="LLM",
+        evidence=[
+            SourceSpan(section_path="Ф-2", line_start=38, line_end=38, quote="до 5 числа", verified=True),
+            SourceSpan(section_path="Критерии приёмки", line_start=90, line_end=90, quote="31 января / 1 февраля", verified=True),
+        ],
+    )
+    res = _deduplicate_set([goal_bpmn_f2, f2_acceptance])
+    assert len(res) == 2

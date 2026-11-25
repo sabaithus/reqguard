@@ -183,7 +183,7 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
         # Проверка покрытия составного LLM-дефекта несколькими уже существующими STRUCTURAL-дефектами
         if cand.origin == "LLM" and cand_lines:
             cand_title_low = cand.title.lower()
-            cand_is_missing_read = "отсутств" in cand_title_low and "чтен" in cand_title_low and "мутир" not in cand_title_low
+            cand_is_missing_read = "чтен" in cand_title_low and not ("мутир" in cand_title_low)
             covering_structural: list[SetDefect] = []
             covered_lines_union: set[int] = set()
             for ex in kept:
@@ -212,13 +212,19 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
             cand_title_low = cand.title.lower()
             # Не сливаем дефект про мутирующий HTTP GET с дефектом про отсутствие отдельного GET-метода чтения
             ex_is_mutating_get = "http get" in ex_title_low or "мутирующ" in ex_title_low
-            cand_is_missing_read = "отсутств" in cand_title_low and "чтен" in cand_title_low and "мутир" not in cand_title_low
+            cand_is_missing_read = "чтен" in cand_title_low and not ("мутир" in cand_title_low)
             if ex_is_mutating_get and cand_is_missing_read:
                 continue
 
             ex_tokens = _tokens(f"{ex.title} {ex.problem} {ex.recommendation}")
             overlap = _spans_overlap(ex.evidence, cand.evidence)
             sim = _jaccard(cand_tokens, ex_tokens)
+
+            ex_secs = {sp.section_path for sp in ex.evidence if sp.section_path}
+            cand_secs = {sp.section_path for sp in cand.evidence if sp.section_path}
+            if ex_secs and cand_secs and not (ex_secs <= cand_secs or cand_secs <= ex_secs) and sim < 0.55:
+                continue
+
             # Если оба дефекта ссылаются на одни и те же строки и описывают одну проблему
             if (
                 (overlap and sim >= 0.30)
