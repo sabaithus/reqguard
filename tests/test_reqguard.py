@@ -522,11 +522,13 @@ def test_pipeline_graceful_degradation_when_pass2_fails(tmp_path: Path) -> None:
 
 
 def test_detect_agent_version_independent_of_cwd(tmp_path: Path) -> None:
+    from reqguard import __version__
+
     orig_cwd = Path.cwd()
     try:
         os.chdir(tmp_path)
         ver = detect_agent_version()
-        assert ver.startswith("v1.0.0")
+        assert ver.startswith(f"v{__version__}")
     finally:
         os.chdir(orig_cwd)
 
@@ -648,3 +650,108 @@ def test_cli_structural_run_on_official_case_md_and_pdf(tmp_path: Path) -> None:
     assert "типов данных" in pdf_report
     assert "Да / Нет" in pdf_report
     assert "200 OK с ERROR vs 400" in pdf_report
+
+
+def test_deduplicator_merges_overlapping_200_400_status_defects(tmp_path: Path) -> None:
+    md_file = tmp_path / "spec.md"
+    md_file.write_text(SAMPLE_SPEC_MD, encoding="utf-8")
+    doc = parse_document(md_file)
+    scan = run_structural_scan(doc)
+    line_err = next(dl.line_no for dl in doc.lines if '{"result":"ERROR"' in dl.raw_text)
+    line_400 = next(dl.line_no for dl in doc.lines if '{"message":"Некорректный запрос"}' in dl.raw_text)
+
+    llm_status_dup = SetDefect(
+        defect_id="DEF-S77",
+        related_req_ids=["REQ-19"],
+        criterion="INTERFACE_INTEGRITY",
+        severity="CRITICAL",
+        title="Несогласованность HTTP-кодов ответа 200 и 400 при ошибке",
+        problem="Для ошибки суммы возвращается статус 200 со строкой ERROR, хотя для невалидных параметров задан 400.",
+        impact="Сломанная обработка ошибок на клиенте.",
+        question_for_analyst="Какой статус возвращать при ошибке?",
+        recommendation="Возвращать 400 Bad Request.",
+        evidence=[
+            SourceSpan(line_start=line_err, line_end=line_err, quote='{"result":"ERROR","message":"Проверьте сумму"}'),
+            SourceSpan(line_start=line_400, line_end=line_400, quote='{"message":"Некорректный запрос"}'),
+        ],
+        origin="LLM",
+    )
+
+    from reqguard.models import RunPassport
+
+    passport = RunPassport(
+        document_title=doc.title,
+        source_file=doc.source_path.name,
+        source_format=doc.source_format,
+        source_sha256="deadbeef",
+        total_lines=doc.total_lines,
+        run_timestamp="2026-11-25 18:30:00",
+        provider="gemini",
+        model_name="test-model",
+        agent_version="v1.2.0",
+        duration_sec=1.0,
+    )
+    report = build_verified_audit_report(
+        doc=doc,
+        passport=passport,
+        requirements=scan.baseline_requirements,
+        candidate_atomic=scan.atomic_defects,
+        candidate_set=scan.set_defects + [llm_status_dup],
+    )
+    status_defs = [sd for sd in report.set_defects if "200" in sd.title and "400" in sd.title]
+    assert len(status_defs) == 1
+    assert status_defs[0].origin == "HYBRID"
+
+
+def test_cli_missing_positional_args_without_serve_exits_with_2() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main([])
+    assert exc_info.value.code == 2
+
+
+def test_web_ui_server_endpoints_and_analysis_job(tmp_path: Path) -> None:
+    import base64
+    import threading
+    import time
+    from reqguard.web_ui import create_web_server
+
+    server = create_web_server(host="127.0.0.1", port=0, base_dir=tmp_path)
+    port = server.server_port
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        base_url = f"http://127.0.0.1:{port}"
+        r_home = httpx.get(f"{base_url}/", timeout=5)
+        assert r_home.status_code == 200
+        assert "ReqGuard Studio" in r_home.text
+
+        r_latest = httpx.get(f"{base_url}/api/latest", timeout=5)
+        assert r_latest.status_code == 200
+        assert r_latest.json()["available"] is False
+
+        b64 = base64.b64encode(SAMPLE_SPEC_MD.encode("utf-8")).decode("ascii")
+        r_start = httpx.post(
+            f"{base_url}/api/analyze",
+            json={"filename": "spec.md", "content_base64": b64, "structural_only": True},
+            timeout=5,
+        )
+        assert r_start.status_code == 202
+        job_id = r_start.json()["job_id"]
+
+        job_data = {}
+        for _ in range(40):
+            r_job = httpx.get(f"{base_url}/api/jobs/{job_id}", timeout=5)
+            assert r_job.status_code == 200
+            job_data = r_job.json()
+            if job_data["status"] in ("done", "error"):
+                break
+            time.sleep(0.1)
+
+        assert job_data["status"] == "done", job_data.get("error")
+        assert job_data["report"]["summary"]["critical_count"] >= 2
+        assert "## 1. Паспорт прогона" in job_data["markdown"]
+        assert "ReqGuard Отчёт" in job_data["html"]
+    finally:
+        server.shutdown()
+        server.server_close()

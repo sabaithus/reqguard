@@ -1,5 +1,7 @@
 """CLI-интерфейс запуска агента одной командой:
 python main.py <путь_к_документу> <путь_к_отчёту.md> [--with-html] [--json report.json]
+или интерактивный Web-режим:
+python main.py --serve
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from reqguard.llm_client import LLMGatewayError
 from reqguard.pipeline import run_audit_pipeline
 from reqguard.reporter_html import render_html_report
 from reqguard.reporter_md import render_markdown_report
+from reqguard.web_ui import run_web_server
 
 console = Console(stderr=True)
 
@@ -31,11 +34,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "input_path",
+        nargs="?",
+        default=None,
         type=Path,
         help="Путь к входному документу с требованиями (.md, .pdf, .docx, .txt)",
     )
     parser.add_argument(
         "output_path",
+        nargs="?",
+        default=None,
         type=Path,
         help="Путь для сохранения итогового отчёта на русском языке (.md)",
     )
@@ -62,12 +69,58 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Выполнить только детерминированный статический анализ без сетевого вызова LLM (для автономной самопроверки)",
     )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Запустить локальный интерактивный Web-интерфейс ReqGuard Studio",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Хост для Web-сервера --serve (по умолчанию 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="Порт для Web-сервера --serve (по умолчанию 8080)",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Не открывать браузер автоматически при запуске --serve",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+
+    if args.serve:
+        url = f"http://{args.host}:{args.port}"
+        console.print(
+            Panel.fit(
+                f"[bold cyan]ReqGuard Studio[/bold cyan] — Локальный Web-интерфейс\n"
+                f"Откройте в браузере: [bold green]{url}[/bold green]\n"
+                f"[dim]Нажмите Ctrl+C для остановки сервера[/dim]",
+                border_style="cyan",
+            )
+        )
+        try:
+            run_web_server(
+                host=args.host,
+                port=args.port,
+                env_file=args.env_file,
+                open_browser=not args.no_browser,
+            )
+            return 0
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Сервер ReqGuard Studio остановлен.[/yellow]")
+            return 0
+
+    if args.input_path is None or args.output_path is None:
+        parser.error("Для запуска проверки укажите два аргумента: input_path и output_path (или используйте --serve).")
 
     try:
         settings = load_settings(args.env_file)

@@ -223,6 +223,7 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
             if (
                 (overlap and sim >= 0.30)
                 or (overlap and ex.criterion == cand.criterion and sim >= 0.26)
+                or (overlap and _same_topic_pair(cand_tokens, ex_tokens))
                 or sim >= 0.50
             ):
                 if SEVERITY_RANK[cand.severity] < SEVERITY_RANK[ex.severity]:

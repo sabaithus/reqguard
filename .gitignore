@@ -19,6 +19,7 @@ dist/
 _official_task/
 runs/
 output/
+submission_ready/
 
 # IDE / OS
 .vscode/

@@ -22,21 +22,10 @@ def _is_real_secret(value: str | None) -> bool:
 
 
 def detect_agent_version(project_root: Path | None = None) -> str:
-    """Возвращает короткий хэш git-коммита или тег версии агента для паспорта прогона."""
-    cwd = str(project_root or Path(__file__).resolve().parents[2])
-    try:
-        proc = subprocess.run(
-            ["git", "describe", "--tags", "--always", "--dirty"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            return f"v1.0.0 ({proc.stdout.strip()})"
-    except Exception:
-        pass
+    """Возвращает версию пакета и короткий хэш git-коммита для паспорта прогона."""
+    from reqguard import __version__
 
+    cwd = str(project_root or Path(__file__).resolve().parents[2])
     try:
         rev = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -46,13 +35,22 @@ def detect_agent_version(project_root: Path | None = None) -> str:
             timeout=3,
         )
         if rev.returncode == 0 and rev.stdout.strip():
-            return f"v1.0.0 ({rev.stdout.strip()})"
+            short_sha = rev.stdout.strip()
+            st = subprocess.run(
+                ["git", "status", "--porcelain", "--untracked-files=no"],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            dirty = st.returncode == 0 and bool(st.stdout.strip())
+            return f"v{__version__} ({short_sha}{'-dirty' if dirty else ''})"
         git_dir = Path(cwd) / ".git"
         if git_dir.exists():
-            return "v1.0.0 (uncommitted)"
+            return f"v{__version__} (uncommitted)"
     except Exception:
         pass
-    return "v1.0.0"
+    return f"v{__version__}"
 
 
 @dataclass(slots=True)
