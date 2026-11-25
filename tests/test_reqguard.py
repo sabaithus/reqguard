@@ -143,7 +143,7 @@ def _build_spec_pdf(pdf_path: Path, md_text: str) -> None:
         if in_code:
             pdf.set_x(pdf.l_margin)
             pdf.set_font("SysFont", "", 9)
-            pdf.multi_cell(pdf.epw, 5, stripped.replace("₸", "тг"))
+            pdf.multi_cell(pdf.epw, 5, stripped)
             i += 1
             continue
         if not stripped or stripped == "---":
@@ -152,7 +152,7 @@ def _build_spec_pdf(pdf_path: Path, md_text: str) -> None:
             continue
         if stripped.startswith("#"):
             hashes = len(stripped) - len(stripped.lstrip("#"))
-            title = stripped.lstrip("#").strip().replace("₸", "тг")
+            title = stripped.lstrip("#").strip()
             size = {1: 16, 2: 14, 3: 12, 4: 11}.get(hashes, 11)
             pdf.set_x(pdf.l_margin)
             pdf.set_font("SysFont", "B", size)
@@ -166,7 +166,7 @@ def _build_spec_pdf(pdf_path: Path, md_text: str) -> None:
             while i < len(lines) and lines[i].strip().startswith("|"):
                 r_txt = lines[i].strip()
                 if not all(ch in "|-: " for ch in r_txt):
-                    cells = [c.strip().replace("**", "").replace("`", "").replace("₸", "тг") for c in r_txt.strip("|").split("|")]
+                    cells = [c.strip().replace("**", "").replace("`", "") for c in r_txt.strip("|").split("|")]
                     tbl_rows.append(cells)
                 i += 1
             if tbl_rows:
@@ -185,7 +185,7 @@ def _build_spec_pdf(pdf_path: Path, md_text: str) -> None:
                 pdf.ln(2)
             continue
 
-        clean_line = stripped.replace("**", "").replace("`", "").replace("₸", "тг")
+        clean_line = stripped.replace("**", "").replace("`", "")
         if clean_line.startswith("* "):
             clean_line = "• " + clean_line[2:]
         pdf.set_x(pdf.l_margin)
@@ -369,6 +369,60 @@ def test_cross_deduplication_eliminates_triple_counting(tmp_path: Path) -> None:
     assert get_set_defects[0].origin == "HYBRID"
     # Легитимный SINGULAR у Ф-2 должен остаться нетронутым
     assert any(ad.criterion == "SINGULAR" and ad.doc_id == "Ф-2" for ad in report.atomic_defects)
+
+
+def test_deduplicator_keeps_mutating_get_separate_from_missing_read_endpoint(tmp_path: Path) -> None:
+    md_file = tmp_path / "spec.md"
+    md_file.write_text(SAMPLE_SPEC_MD, encoding="utf-8")
+    doc = parse_document(md_file)
+    scan = run_structural_scan(doc)
+    line_desc = next(dl.line_no for dl in doc.lines if "**Description**" in dl.raw_text)
+    line_get = next(dl.line_no for dl in doc.lines if "**REST type**" in dl.raw_text)
+
+    missing_read_llm = SetDefect(
+        defect_id="DEF-S88",
+        related_req_ids=["REQ-15"],
+        criterion="INTERFACE_INTEGRITY",
+        severity="CRITICAL",
+        title="Отсутствие REST API метода для чтения настроек порога и расходов",
+        problem="В Description указано чтение порога, но в API описан только saveLimit через GET.",
+        impact="UI не сможет загрузить текущие настройки.",
+        question_for_analyst="Какой эндпоинт возвращает текущие настройки?",
+        recommendation="Добавить GET /alerts/getLimit.",
+        evidence=[
+            SourceSpan(
+                line_start=line_desc,
+                line_end=line_get,
+                quote="| **Description** | Сохранение порога. Функциональные требования: чтение порога |\n| **REST type** | GET |",
+            )
+        ],
+        origin="LLM",
+    )
+
+    from reqguard.models import RunPassport
+
+    passport = RunPassport(
+        document_title=doc.title,
+        source_file=doc.source_path.name,
+        source_format=doc.source_format,
+        source_sha256="deadbeef",
+        total_lines=doc.total_lines,
+        run_timestamp="2026-11-25 18:00:00",
+        provider="gemini",
+        model_name="test-model",
+        agent_version="v1.0.0",
+        duration_sec=1.0,
+    )
+    report = build_verified_audit_report(
+        doc=doc,
+        passport=passport,
+        requirements=scan.baseline_requirements,
+        candidate_atomic=scan.atomic_defects,
+        candidate_set=scan.set_defects + [missing_read_llm],
+    )
+    titles = [sd.title for sd in report.set_defects]
+    assert any("HTTP GET" in t for t in titles)
+    assert any("чтения настроек" in t for t in titles)
 
 
 def test_llm_gateway_fallback_on_404_503_timeout_and_thinking_400() -> None:

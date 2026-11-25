@@ -182,10 +182,15 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
 
         # Проверка покрытия составного LLM-дефекта несколькими уже существующими STRUCTURAL-дефектами
         if cand.origin == "LLM" and cand_lines:
+            cand_title_low = cand.title.lower()
+            cand_is_missing_read = "отсутств" in cand_title_low and "чтен" in cand_title_low and "мутир" not in cand_title_low
             covering_structural: list[SetDefect] = []
             covered_lines_union: set[int] = set()
             for ex in kept:
                 if ex.origin not in ("STRUCTURAL", "HYBRID"):
+                    continue
+                ex_title_low = ex.title.lower()
+                if ("http get" in ex_title_low or "мутирующ" in ex_title_low) and cand_is_missing_read:
                     continue
                 ex_lines = {ln for sp in ex.evidence for ln in range(sp.line_start, sp.line_end + 1)}
                 overlap_lines = cand_lines & ex_lines
@@ -203,14 +208,22 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
 
         merged = False
         for ex in kept:
+            ex_title_low = ex.title.lower()
+            cand_title_low = cand.title.lower()
+            # Не сливаем дефект про мутирующий HTTP GET с дефектом про отсутствие отдельного GET-метода чтения
+            ex_is_mutating_get = "http get" in ex_title_low or "мутирующ" in ex_title_low
+            cand_is_missing_read = "отсутств" in cand_title_low and "чтен" in cand_title_low and "мутир" not in cand_title_low
+            if ex_is_mutating_get and cand_is_missing_read:
+                continue
+
             ex_tokens = _tokens(f"{ex.title} {ex.problem} {ex.recommendation}")
             overlap = _spans_overlap(ex.evidence, cand.evidence)
             sim = _jaccard(cand_tokens, ex_tokens)
             # Если оба дефекта ссылаются на одни и те же строки и описывают одну проблему
             if (
-                (overlap and sim >= 0.22)
-                or (overlap and ex.criterion == cand.criterion and sim >= 0.15)
-                or sim >= 0.48
+                (overlap and sim >= 0.30)
+                or (overlap and ex.criterion == cand.criterion and sim >= 0.26)
+                or sim >= 0.50
             ):
                 if SEVERITY_RANK[cand.severity] < SEVERITY_RANK[ex.severity]:
                     ex.severity = cand.severity
