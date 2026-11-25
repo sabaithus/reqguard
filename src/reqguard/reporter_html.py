@@ -16,7 +16,7 @@ def render_html_report(report: AuditReport) -> str:
     p = report.passport
     s = report.summary
 
-    badge_color = "#dc2626" if s.critical_count > 0 else ("#d97706" if s.major_count >= 3 else "#16a34a")
+    badge_color = "#dc2626" if s.critical_count > 0 else ("#d97706" if s.can_start_development is None or s.major_count >= 3 else "#16a34a")
 
     req_rows_html = []
     for r in report.requirements:
@@ -150,18 +150,18 @@ def render_html_report(report: AuditReport) -> str:
     <div class="hero">
       <div class="verdict-banner">{html.escape(s.verdict)}</div>
       <h1>Аудит качества ТЗ: «{html.escape(p.document_title)}»</h1>
-      <p>{html.escape(s.verdict_rationale)}</p>
+      <p>{html.escape(p.status_label)}. {html.escape(s.verdict_rationale)}</p>
       <div class="passport">
         <span>Файл: <strong>{html.escape(p.source_file)}</strong> ({html.escape(p.source_format)}, {p.total_lines} строк)</span>
         <span>Модель: <strong>{html.escape(p.provider)} / {html.escape(p.model_name)}</strong></span>
         <span>Версия агента: <strong>{html.escape(p.agent_version)}</strong></span>
-        <span>Верифицировано цитат: <strong>{p.verified_quotes_count}</strong> (отсеяно галлюцинаций: {p.hallucinations_filtered})</span>
+        <span>Верифицировано цитат: <strong>{p.verified_quotes_count}</strong> (отклонено записей: {p.hallucinations_filtered})</span>
         <span>Время: <strong>{p.duration_sec:.2f} с</strong></span>
       </div>
     </div>
 
     <div class="kpi-grid">
-      <div class="kpi"><div class="num">{s.readiness_score}/100</div><div class="lbl">Индекс готовности ТЗ</div></div>
+      <div class="kpi"><div class="num">{s.score_label}</div><div class="lbl">Индекс готовности ТЗ</div></div>
       <div class="kpi"><div class="num">{s.total_requirements}</div><div class="lbl">Выделено требований</div></div>
       <div class="kpi"><div class="num" style="color:var(--crit)">{s.critical_count}</div><div class="lbl">Критичных блокеров</div></div>
       <div class="kpi"><div class="num" style="color:var(--maj)">{s.major_count}</div><div class="lbl">Существенных (Major)</div></div>

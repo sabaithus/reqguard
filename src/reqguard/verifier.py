@@ -55,6 +55,15 @@ def verify_and_anchor_span(doc: ParsedDocument, candidate: SourceSpan) -> Source
             return None
         fragments = [norm_single]
 
+    def ordered_match(text: str) -> bool:
+        offset = 0
+        for fragment in fragments:
+            pos = text.find(fragment, offset)
+            if pos < 0:
+                return False
+            offset = pos + len(fragment)
+        return True
+
     norm_full = " ".join(fragments)
     quote_tokens = _tokens(raw_quote)
 
@@ -70,17 +79,17 @@ def verify_and_anchor_span(doc: ParsedDocument, candidate: SourceSpan) -> Source
         combined_norm = " ".join(norm_lines[i - 1] for i in range(s, e + 1) if norm_lines[i - 1])
         if not combined_norm:
             return None
-        if all(frag in combined_norm for frag in fragments):
+        if ordered_match(combined_norm):
             # Сужаем окно сверху и снизу до минимально необходимого диапазона строк
             while s < e:
                 shrunk = " ".join(norm_lines[i - 1] for i in range(s + 1, e + 1) if norm_lines[i - 1])
-                if all(frag in shrunk for frag in fragments):
+                if ordered_match(shrunk):
                     s += 1
                 else:
                     break
             while e > s:
                 shrunk = " ".join(norm_lines[i - 1] for i in range(s, e) if norm_lines[i - 1])
-                if all(frag in shrunk for frag in fragments):
+                if ordered_match(shrunk):
                     e -= 1
                 else:
                     break
@@ -103,7 +112,7 @@ def verify_and_anchor_span(doc: ParsedDocument, candidate: SourceSpan) -> Source
     # 1. Проверяем указанный диапазон строк (и соседние ±3 строки на случай смещения)
     hint_s = max(1, min(total, candidate.line_start))
     hint_e = max(hint_s, min(total, candidate.line_end))
-    if len(norm_full) >= 10 or len(norm_full) >= 5:
+    if len(norm_full) >= 5:
         exact_hit = _check_window(hint_s, hint_e, allow_short_exact=(len(norm_full) < 10))
         if exact_hit:
             return exact_hit
@@ -315,6 +324,7 @@ def build_verified_audit_report(
     filtered_hallucinations = initial_filtered_count
     verified_quotes = sum(1 for r in requirements if r.source.verified)
 
+    req_sources = {r.report_id: r.source for r in requirements}
     verified_atomic: list[AtomicDefect] = []
     for ad in candidate_atomic:
         valid_spans: list[SourceSpan] = []
@@ -323,7 +333,8 @@ def build_verified_audit_report(
             if v_sp is not None:
                 valid_spans.append(v_sp)
                 verified_quotes += 1
-        if not valid_spans:
+        target = req_sources.get(ad.req_id)
+        if not valid_spans or target is None or not _spans_overlap([target], valid_spans):
             filtered_hallucinations += 1
             continue
         ad.evidence = valid_spans
@@ -341,7 +352,12 @@ def build_verified_audit_report(
                     valid_spans.append(v_sp)
                     seen_locs.add(loc)
                     verified_quotes += 1
-        if not valid_spans:
+        rejected = len(sd.evidence) - len(seen_locs)
+        incomplete = sd.origin == "LLM" and (
+            rejected > 0 or (sd.criterion in ("CONSISTENT", "VERIFIABLE_SET") and len(valid_spans) < 2)
+        )
+        bundled = sd.origin == "LLM" and len(re.findall(r"(?:^|\s)\d+\)\s", sd.problem)) > 1
+        if not valid_spans or incomplete or bundled:
             filtered_hallucinations += 1
             continue
         sd.evidence = valid_spans
@@ -394,18 +410,14 @@ def build_verified_audit_report(
         can_dev = False
         can_qa = False
         verdict = "НЕ ГОТОВО К РАЗРАБОТКЕ И ТЕСТИРОВАНИЮ (ЕСТЬ КРИТИЧНЫЕ БЛОКЕРЫ)"
-        rationale = (
-            f"В документе обнаружено {crit_n} критичных противоречий/пропусков и {maj_n} существенных дефектов. "
-            "Начинать разработку и написание приёмочных автотестов в текущей редакции нельзя: разные участники "
-            "команды (бэкенд, мобильная разработка, процессинг и QA) реализуют несовместимую логику расчёта "
-            "месячных расходов, отправки push-уведомлений и HTTP-контракта API."
-        )
+        blockers = [d.defect_id for d in [*dedup_set, *dedup_atomic] if d.severity == "CRITICAL"]
+        rationale = "До начала работ согласуйте блокирующие замечания: " + ", ".join(blockers) + "."
     elif maj_n >= 3:
         can_dev = False
         can_qa = False
         verdict = "УСЛОВНО ГОТОВО (ТРЕБУЕТСЯ УТОЧНЕНИЕ СУЩЕСТВЕННЫХ ЗАМЕЧАНИЙ ДО СТАРТА)"
         rationale = (
-            f"Прямых критичных блокеров нет, однако выявлено {maj_n} существенных недосканностей в требованиях "
+            f"Прямых критичных блокеров нет, однако выявлено {maj_n} существенных замечаний в требованиях "
             "и контрактах. Рекомендуется закрыть вопросы аналитику до фиксации спринта."
         )
     else:
@@ -416,6 +428,27 @@ def build_verified_audit_report(
             "Критичных противоречий и блокирующих пропусков не выявлено; незначительные замечания могут быть "
             "уточнены в рабочем порядке."
         )
+
+    if filtered_hallucinations and not crit_n and passport.analysis_status == "complete":
+        passport.analysis_status = "unverified_findings"
+    if not requirements or passport.analysis_status in ("unverified_findings", "structural_only", "phase2_failed", "coverage_incomplete", "insufficient_input"):
+        reasons = {
+            "unverified_findings": "Отброшены неподтверждённые утверждения модели. Требуется повторная проверка.",
+            "structural_only": "Выполнена только статическая проверка.",
+            "phase2_failed": "Модель не завершила проверку всего набора.",
+            "coverage_incomplete": "Индивидуальная оценка модели охватила только часть выделенных требований.",
+        }
+        reason = reasons.get(passport.analysis_status, "Проверяемые требования не выделены.")
+        if not requirements:
+            reason = "Проверяемые требования не выделены."
+        if not crit_n or not requirements:
+            readiness_score = None
+            can_dev = can_qa = None
+            verdict = "ГОТОВНОСТЬ НЕ УСТАНОВЛЕНА"
+            rationale = reason
+        else:
+            verdict = "ОБНАРУЖЕНЫ БЛОКЕРЫ. ПРОВЕРКА НЕПОЛНАЯ"
+            rationale = reason + " " + rationale
 
     priority_fixes: list[str] = []
     for sd in dedup_set:

@@ -84,6 +84,7 @@ class ResilientLLMClient:
 
     def __init__(self, settings: LLMSettings) -> None:
         self.settings = settings
+        self.http_models: list[str] = []
         self.calls_count: int = 0
         self.last_used_model: str = settings.primary_model
 
@@ -178,7 +179,10 @@ class ResilientLLMClient:
         p = self.settings.provider
         timeout = httpx.Timeout(self.settings.timeout_sec, connect=15.0)
 
-        with httpx.Client(timeout=timeout) as client:
+        def count_attempt(request: httpx.Request) -> None:
+            self.http_models.append(model_name)
+
+        with httpx.Client(timeout=timeout, event_hooks={"request": [count_attempt]}) as client:
             if p == "gemini":
                 url = f"{self.settings.base_url}/models/{model_name}:generateContent"
                 gen_cfg: dict = {
@@ -192,10 +196,10 @@ class ResilientLLMClient:
                     "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
                     "generationConfig": gen_cfg,
                 }
-                resp = client.post(url, params={"key": self.settings.api_key}, json=payload)
+                resp = client.post(url, headers={"x-goog-api-key": self.settings.api_key}, json=payload)
                 if resp.status_code == 400 and "thinking" in resp.text.lower() and "thinkingConfig" in gen_cfg:
                     gen_cfg.pop("thinkingConfig", None)
-                    resp = client.post(url, params={"key": self.settings.api_key}, json=payload)
+                    resp = client.post(url, headers={"x-goog-api-key": self.settings.api_key}, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
                 candidates = data.get("candidates") or []

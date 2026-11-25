@@ -62,8 +62,8 @@ class _LLMRawAtomicDefect(BaseModel):
 
 
 class _Pass1Response(BaseModel):
-    requirements: list[_LLMRawReq] = Field(default_factory=list)
-    atomic_defects: list[_LLMRawAtomicDefect] = Field(default_factory=list)
+    requirements: list[_LLMRawReq]
+    atomic_defects: list[_LLMRawAtomicDefect]
 
 
 class _LLMRawQuote(BaseModel):
@@ -85,7 +85,9 @@ class _LLMRawSetDefect(BaseModel):
 
 
 class _Pass2Response(BaseModel):
-    set_defects: list[_LLMRawSetDefect] = Field(default_factory=list)
+    reviewed_req_ids: list[str] = Field(default_factory=list)
+    additional_atomic_defects: list[_LLMRawAtomicDefect] = Field(default_factory=list)
+    set_defects: list[_LLMRawSetDefect]
 
 
 def _merge_requirements(
@@ -113,6 +115,7 @@ def _merge_requirements(
             continue
 
         item = RequirementItem(
+            model_reviewed=True,
             report_id="TEMP",
             doc_id=clean_doc_id,
             category=raw.category,
@@ -138,6 +141,7 @@ def _merge_requirements(
             continue
         base_lines = set(range(base_req.source.line_start, base_req.source.line_end + 1))
         if not (base_lines & covered_lines):
+            base_req.model_reviewed = False
             merged.append(base_req)
             covered_lines.update(base_lines)
 
@@ -197,13 +201,22 @@ def run_audit_pipeline(
     raw_llm_atomic: list[_LLMRawAtomicDefect] = []
     raw_llm_set: list[_LLMRawSetDefect] = []
 
+    analysis_status = "complete"
     if settings.provider == "none" and allow_structural_only:
+        analysis_status = "structural_only"
         notify("Режим без внешнего LLM (structural-only): пропуск сетевых вызовов...")
         provider_label = "structural-only"
         model_label = "deterministic-static-engine"
     else:
         notify(f"Шаг 3/5: LLM Фаза 1 ({settings.provider}:{settings.primary_model}) — нарезка и индивидуальная проверка требований (ISO 29148 п. 5.2.5)...")
         pass1_prompt = build_pass1_atomic_prompt(numbered_text)
+        if structural.baseline_requirements:
+            pass1_prompt += (
+                "\nЧерновой реестр парсера для проверки покрытия. Проверь каждую строку "
+                "по исходному тексту. Исправь ошибки нарезки, добавь пропуски и верни "
+                "проверенные элементы в requirements.\n"
+                + _format_req_catalog(structural.baseline_requirements)
+            )
         pass1_resp = llm_client.generate_structured(
             system_prompt=SYSTEM_PROMPT_AUDITOR,
             user_prompt=pass1_prompt,
@@ -223,6 +236,15 @@ def run_audit_pipeline(
         notify(f"Шаг 4/5: LLM Фаза 2 ({settings.provider}:{llm_client.last_used_model}) — перекрёстная проверка набора и трассировка приёмки (ISO 29148 п. 5.2.6 / IEEE 830)...")
         catalog_str = _format_req_catalog(requirements)
         pass2_prompt = build_pass2_set_prompt(numbered_text, catalog_str)
+        pending = {r.report_id for r in requirements if not r.model_reviewed}
+        if pending:
+            pass2_prompt += (
+                "\nТакже выполни индивидуальную проверку следующих пунктов: " + ", ".join(sorted(pending))
+                + ". Добавь reviewed_req_ids со списком фактически проверенных ID и "
+                "additional_atomic_defects с выявленными индивидуальными дефектами "
+                "(temp_req_id = REQ-ID, criterion, severity, problem, impact, recommendation, "
+                "line_start, line_end, quote). Если дефектов нет, верни пустой массив."
+            )
         try:
             pass2_resp = llm_client.generate_structured(
                 system_prompt=SYSTEM_PROMPT_AUDITOR,
@@ -231,12 +253,22 @@ def run_audit_pipeline(
                 status_cb=notify,
             )
             raw_llm_set = pass2_resp.set_defects
+            reviewed = set(pass2_resp.reviewed_req_ids) & pending
+            for req in requirements:
+                if req.report_id in reviewed:
+                    req.model_reviewed = True
+            for defect in pass2_resp.additional_atomic_defects:
+                if defect.temp_req_id in reviewed:
+                    key = f"phase2:{defect.temp_req_id}"
+                    temp_id_map[key] = defect.temp_req_id
+                    raw_llm_atomic.append(defect.model_copy(update={"temp_req_id": key}))
         except LLMGatewayError as exc:
             if llm_client.calls_count >= 1:
                 notify(
                     f"  [!] Предупреждение: Фаза 2 LLM завершилась ошибкой ({exc}). "
                     "Сборка отчёта продолжается на данных AST, статического анализатора и Фазы 1."
                 )
+                analysis_status = "phase2_failed"
                 raw_llm_set = []
             else:
                 raise
@@ -262,7 +294,9 @@ def run_audit_pipeline(
             if s_ad.doc_id
             else line_to_req.get(s_ad.evidence[0].line_start)
         )
-        s_ad.req_id = matched_req.report_id if matched_req else (requirements[0].report_id if requirements else "REQ-01")
+        if matched_req is None:
+            continue
+        s_ad.req_id = matched_req.report_id
         s_ad.doc_id = matched_req.doc_id if matched_req else s_ad.doc_id
         candidate_atomic.append(s_ad)
 
@@ -274,7 +308,9 @@ def run_audit_pipeline(
                 resolved_req_id = m_req.report_id
         if not resolved_req_id:
             m_req = line_to_req.get(raw_ad.line_start)
-            resolved_req_id = m_req.report_id if m_req else (requirements[0].report_id if requirements else "REQ-01")
+            if m_req is None:
+                continue
+            resolved_req_id = m_req.report_id
 
         req_obj = next((r for r in requirements if r.report_id == resolved_req_id), None)
         candidate_atomic.append(
@@ -322,7 +358,11 @@ def run_audit_pipeline(
                 problem=raw_sd.problem.strip(),
                 impact=raw_sd.impact.strip(),
                 question_for_analyst=raw_sd.question_for_analyst.strip(),
-                recommendation=raw_sd.recommendation.strip(),
+                recommendation=(
+                    "Уточнить у владельца документа: " + raw_sd.question_for_analyst.strip()
+                    if raw_sd.criterion == "COMPLETE_SET"
+                    else raw_sd.recommendation.strip()
+                ),
                 evidence=[
                     SourceSpan(
                         line_start=ev.line_start,
@@ -345,12 +385,18 @@ def run_audit_pipeline(
                         inferred.append(line_to_req[ln].report_id)
             sd.related_req_ids = sorted(set(inferred))
 
+    if not requirements:
+        analysis_status = "insufficient_input"
+    elif analysis_status == "complete" and any(not r.model_reviewed for r in requirements):
+        analysis_status = "coverage_incomplete"
+
     duration = round(time.perf_counter() - t0, 2)
     passport = RunPassport(
         document_title=doc.title,
         source_file=doc.source_path.name,
         source_format=doc.source_format,
-        source_sha256=doc.sha256[:16],
+        source_sha256=doc.sha256,
+        analysis_status=analysis_status,
         total_lines=doc.total_lines,
         total_pages=doc.total_pages,
         run_timestamp=datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z"),
@@ -359,6 +405,7 @@ def run_audit_pipeline(
         agent_version=detect_agent_version(),
         duration_sec=duration,
         llm_calls_count=llm_client.calls_count,
+        http_attempt_models=llm_client.http_models,
     )
 
     return build_verified_audit_report(

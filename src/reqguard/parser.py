@@ -531,20 +531,26 @@ def parse_document(path: str | Path) -> ParsedDocument:
 
     total_pages: int | None = None
     if ext in (".md", ".markdown", ".txt"):
-        text = raw_bytes.decode("utf-8-sig", errors="replace")
+        text = raw_bytes.decode("utf-8-sig")
         raw_items = [(line, None) for line in text.splitlines()]
         fmt = "Markdown" if ext in (".md", ".markdown") else "PlainText"
     elif ext == ".pdf":
-        raw_items, total_pages = _read_pdf_lines(file_path)
+        from pypdf.errors import PyPdfError
+        try:
+            raw_items, total_pages = _read_pdf_lines(file_path)
+        except PyPdfError as exc:
+            raise ValueError("PDF повреждён или недоступен для чтения.") from exc
         fmt = "PDF"
     elif ext == ".docx":
-        raw_items = _read_docx_lines(file_path)
+        from zipfile import BadZipFile
+        from docx.opc.exceptions import PackageNotFoundError
+        try:
+            raw_items = _read_docx_lines(file_path)
+        except (BadZipFile, PackageNotFoundError, KeyError) as exc:
+            raise ValueError("Не удалось прочитать документ DOCX.") from exc
         fmt = "DOCX"
     else:
-        # Универсальная попытка прочитать как UTF-8 текст
-        text = raw_bytes.decode("utf-8-sig", errors="replace")
-        raw_items = [(line, None) for line in text.splitlines()]
-        fmt = f"Text ({ext or 'raw'})"
+        raise ValueError(f"Неподдерживаемый формат {ext!r}. Допустимы PDF, DOCX, Markdown и TXT.")
 
     if not any(line.strip() for line, _ in raw_items):
         raise ValueError(f"Документ '{file_path.name}' пуст.")

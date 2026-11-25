@@ -57,16 +57,17 @@ def render_markdown_report(report: AuditReport) -> str:
     out.append("| Параметр | Значение |")
     out.append("| :--- | :--- |")
     out.append(f"| **Проверяемый документ** | `{_esc_md_cell(p.document_title)}` (`{_esc_md_cell(p.source_file)}`) |")
+    out.append(f"| **Полнота анализа** | {p.status_label} |")
     pages_info = f", страниц: {p.total_pages}" if p.total_pages else ""
     out.append(f"| **Формат и объём** | {p.source_format} (строк: {p.total_lines}{pages_info}, SHA-256: `{p.source_sha256}`) |")
     out.append(f"| **Дата и время прогона** | {p.run_timestamp} |")
-    out.append(f"| **Провайдер и модель LLM** | `{p.provider}` / `{p.model_name}` (вызовов API: {p.llm_calls_count}) |")
+    out.append(f"| **Провайдер и модель LLM** | `{p.provider}` / `{p.model_name}` (ответов с текстом: {p.llm_calls_count}) |")
     out.append(f"| **Версия агента** | `{p.agent_version}` |")
     out.append(f"| **Длительность анализа** | {p.duration_sec:.2f} сек |")
     out.append(
-        f"| **Контроль анти-галлюцинаций** | Подтверждено дословных цитат: **{p.verified_quotes_count}**, отсеяно неподтверждённых утверждений: **{p.hallucinations_filtered}** |"
+        f"| **Контроль анти-галлюцинаций** | Привязок к источнику до объединения: **{p.verified_quotes_count}**, отклонено записей: **{p.hallucinations_filtered}** |"
     )
-    out.append(f"| **Индекс готовности спецификации** | **{s.readiness_score} / 100** — **{s.verdict}** |")
+    out.append(f"| **Индекс готовности спецификации** | **{s.score_label}** — **{s.verdict}** |")
     out.append("")
 
     # 2. Как агент нарезал требования
@@ -108,7 +109,8 @@ def render_markdown_report(report: AuditReport) -> str:
         r_defs = defects_by_req.get(req.report_id, [])
         doc_label = req.doc_id or "—"
         if not r_defs:
-            out.append(f"| `{req.report_id}` | {doc_label} | Атомарных дефектов не выявлено | — |")
+            status = "В отчёте нет атомарных замечаний" if req.model_reviewed else "Индивидуальная оценка модели не подтверждена"
+            out.append(f"| `{req.report_id}` | {doc_label} | {status} | — |")
         else:
             max_sev = r_defs[0].severity
             sev_ru = SEVERITY_LABELS_RU[max_sev]
@@ -217,7 +219,9 @@ def render_markdown_report(report: AuditReport) -> str:
     out.append("")
     dev_status = "ДА (можно начинать)" if s.can_start_development else "НЕТ (нельзя начинать до устранения блокеров)"
     qa_status = "ДА (можно начинать)" if s.can_start_testing else "НЕТ (критерии приёмки и контракты противоречивы)"
-    out.append(f"- **Итоговый статус документа:** **{s.verdict}** (Индекс качества: **{s.readiness_score}/100**)")
+    if s.can_start_development is None:
+        dev_status = qa_status = "НЕДОСТАТОЧНО ДАННЫХ"
+    out.append(f"- **Итоговый статус документа:** **{s.verdict}** (Индекс качества: **{s.score_label}**)")
     out.append(f"- **Готовность к передаче в разработку:** **{dev_status}**")
     out.append(f"- **Готовность к проектированию приёмочных тестов (QA):** **{qa_status}**")
     out.append(f"- **Обоснование:** {s.verdict_rationale}")

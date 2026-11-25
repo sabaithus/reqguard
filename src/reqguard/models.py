@@ -104,6 +104,7 @@ class SourceSpan(BaseModel):
 
 
 class RequirementItem(BaseModel):
+    model_reviewed: bool | None = None
     """Единица требования, выделенная агентом при нарезке документа."""
 
     report_id: str = Field(description="Внутренний ID в отчёте, например REQ-01")
@@ -177,10 +178,25 @@ class RunPassport(BaseModel):
     provider: str
     model_name: str
     agent_version: str
+    analysis_status: Literal["complete", "structural_only", "phase2_failed", "insufficient_input", "coverage_incomplete", "unverified_findings", "unknown"] = "unknown"
     duration_sec: float
+    http_attempt_models: list[str] = Field(default_factory=list)
     llm_calls_count: int = 0
     verified_quotes_count: int = 0
     hallucinations_filtered: int = 0
+
+
+    @property
+    def status_label(self) -> str:
+        return {
+            "complete": "Обе фазы завершены",
+            "coverage_incomplete": "Часть каталога выделена только статическим сканером",
+            "phase2_failed": "Вторая фаза модели не завершена",
+            "structural_only": "Только статическая проверка",
+            "insufficient_input": "Проверяемые требования не выделены",
+            "unverified_findings": "Часть утверждений модели отклонена при проверке доказательств",
+            "unknown": "Статус отсутствует в паспорте этой версии",
+        }[self.analysis_status]
 
 
 class AuditSummary(BaseModel):
@@ -195,12 +211,17 @@ class AuditSummary(BaseModel):
     major_count: int
     minor_count: int
     by_criterion: dict[str, int] = Field(default_factory=dict)
-    readiness_score: int = Field(ge=0, le=100)
+    readiness_score: int | None = Field(ge=0, le=100)
     verdict: str
-    can_start_development: bool
-    can_start_testing: bool
+    can_start_development: bool | None
+    can_start_testing: bool | None
     verdict_rationale: str
     priority_fixes: list[str] = Field(default_factory=list)
+
+
+    @property
+    def score_label(self) -> str:
+        return "не оценено" if self.readiness_score is None else f"{self.readiness_score}/100"
 
 
 class AuditReport(BaseModel):

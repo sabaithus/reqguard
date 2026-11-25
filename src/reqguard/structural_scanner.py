@@ -278,6 +278,50 @@ def extract_baseline_requirements(doc: ParsedDocument) -> list[RequirementItem]:
     return items
 
 
+# Сопоставление месяца события с месяцем явно названного счётчика.
+_MONTH_NAMES = (
+    ("января", "январский"), ("февраля", "февральский"), ("марта", "мартовский"),
+    ("апреля", "апрельский"), ("мая", "майский"), ("июня", "июньский"),
+    ("июля", "июльский"), ("августа", "августовский"), ("сентября", "сентябрьский"),
+    ("октября", "октябрьский"), ("ноября", "ноябрьский"), ("декабря", "декабрьский"),
+)
+
+
+def _check_accounting_month(doc: ParsedDocument) -> list[SetDefect]:
+    rules = [line for line in doc.lines if re.search(
+        r"месяц определяется по дате (совершения|проведения) покупки", line.raw_text, re.I
+    )]
+    if len(rules) != 1:
+        return []
+    rule = rules[0]
+    purchase_date = "по дате совершения" in rule.raw_text.lower()
+    findings = []
+    for table in doc.tables:
+        if len(table.headers) != 3 or not any(word in table.headers[2].lower() for word in ("ожидаем", "результат")):
+            continue
+        for row in table.rows:
+            if len(row.cells) != 3:
+                continue
+            initial, action, expected = [c.lower() for c in row.cells]
+            if "покупк" not in initial or "провести" not in action:
+                continue
+            event_text = initial if purchase_date else action
+            months = [m for m, _ in _MONTH_NAMES if re.search(r"\b\d{1,2}\s+" + m + r"\b", event_text)]
+            expected_months = [m for m, adj in _MONTH_NAMES if re.search(adj + r"\s+сч[её]тчик вырос", expected)]
+            if len(months) != 1 or len(expected_months) != 1 or months == expected_months:
+                continue
+            findings.append(SetDefect(
+                defect_id="calendar", related_req_ids=[], criterion="VERIFIABLE_SET", severity="CRITICAL",
+                title="Месяц в критерии приёмки расходится с правилом учёта",
+                problem=f"Дата события по правилу: «{event_text}». В ожидаемом результате указан другой месяц: «{expected}».",
+                impact="Одна реализация не может одновременно пройти этот пример и выполнить правило учёта.",
+                question_for_analyst="Какой источник следует исправить: правило выбора даты или ожидаемый результат?",
+                recommendation="Согласовать правило и пример, затем повторить проверку на границе месяцев.",
+                evidence=[_make_span(rule), _make_span(doc.lines[row.line_no - 1])], origin="STRUCTURAL",
+            ))
+    return findings
+
+
 def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
     """Выполняет детерминированные статические проверки документа."""
     baseline_reqs = extract_baseline_requirements(doc)
@@ -461,6 +505,8 @@ def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
                     origin="STRUCTURAL",
                 )
             )
+
+    set_defects.extend(_check_accounting_month(doc))
 
     # 4. Статический анализ контрактов REST API
     _scan_rest_api_contracts(doc, set_defects, next_sid)
@@ -674,10 +720,10 @@ def _scan_rest_api_contracts(
                     + ", ".join(mismatched_names)
                     + "."
                 ),
-                impact="Ошибки сериализации/десериализации в мобильном клиенте и автотестах контракта; булев признак `enabled` передаётся как `0/1` integer на входе и строка `\"0\"/\"1\"` на выходе.",
-                question_for_analyst="Какой канонический JSON-тип должен использоваться для `amount` (`integer`) и `enabled` (`boolean` или `integer`) во всех методах API?",
-                recommendation="Унифицировать типы в JSON-контракте: `amount` как `integer` (целое число тенге), `enabled` как `boolean` (`true`/`false`) одинаково в запросе и ответе.",
-                evidence=mismatched_spans[:4],
+                impact="Клиенту требуется явное преобразование между входным и выходным представлениями.",
+                question_for_analyst="Преднамеренно ли различаются представления перечисленных полей?",
+                recommendation="Если различие предусмотрено, зафиксировать правило преобразования и пример. Иначе согласовать типы в контракте.",
+                evidence=mismatched_spans,
                 origin="STRUCTURAL",
             )
         )

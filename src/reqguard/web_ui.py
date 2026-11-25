@@ -190,13 +190,13 @@ STUDIO_HTML = r"""<!DOCTYPE html>
         <label class="mode-box">
           <span>
             <strong>Только статический скан (&lt; 1 сек)</strong><br>
-            <small style="color:var(--muted)">Без вызова LLM API — проверка структуры, таблиц и REST API</small>
+            <small style="color:var(--muted)">В полном режиме текст документа отправляется настроенному провайдеру. В этом режиме без вызова LLM API — проверка структуры, таблиц и REST API</small>
           </span>
           <input type="checkbox" id="structuralOnly" style="width:18px;height:18px;">
         </label>
         <div class="btn-row">
           <button class="btn primary" id="runBtn" disabled>Запустить аудит</button>
-          <button class="btn" id="loadLatestBtn" style="display:none">Открыть эталонный отчёт</button>
+          <button class="btn" id="loadLatestBtn" style="display:none">Открыть сохранённый отчёт</button>
         </div>
       </div>
     </div>
@@ -220,7 +220,7 @@ STUDIO_HTML = r"""<!DOCTYPE html>
 
       <div class="biz-panel">
         <div>
-          <strong>Бизнес-ценность до старта разработки:</strong>
+          <strong>Сводка результатов:</strong>
           <span id="bizSummaryText" style="color:#cbd5e1;margin-left:6px"></span>
         </div>
         <div class="btn-row">
@@ -355,7 +355,7 @@ STUDIO_HTML = r"""<!DOCTYPE html>
 
       const pill = document.getElementById('verdictPill');
       pill.textContent = s.verdict;
-      pill.className = 'verdict-pill ' + (s.critical_count > 0 ? 'bad' : (s.major_count >= 3 ? 'warn' : 'ok'));
+      pill.className = 'verdict-pill ' + (s.critical_count > 0 ? 'bad' : (s.can_start_development == null || s.major_count >= 3 ? 'warn' : 'ok'));
 
       document.getElementById('docTitle').textContent = 'Аудит ТЗ: «' + p.document_title + '»';
       document.getElementById('verdictRationale').textContent = s.verdict_rationale;
@@ -363,18 +363,18 @@ STUDIO_HTML = r"""<!DOCTYPE html>
         `<span>Файл: <b>${esc(p.source_file)}</b> (${esc(p.source_format)}, строк: ${p.total_lines})</span>` +
         `<span>Модель: <b>${esc(p.provider)} / ${esc(p.model_name)}</b></span>` +
         `<span>Версия: <b>${esc(p.agent_version)}</b></span>` +
-        `<span>Верифицировано цитат: <b>${p.verified_quotes_count}</b> (отсеяно галлюцинаций: ${p.hallucinations_filtered})</span>` +
+        `<span>Верифицировано цитат: <b>${p.verified_quotes_count}</b> (отклонено записей: ${p.hallucinations_filtered})</span>` +
         `<span>Время: <b>${p.duration_sec} с</b></span>`;
 
       document.getElementById('kpiGrid').innerHTML =
-        `<div class="kpi"><div class="num">${s.readiness_score}/100</div><div class="lbl">Индекс готовности ТЗ</div></div>` +
+        `<div class="kpi"><div class="num">${s.readiness_score == null ? 'не оценено' : s.readiness_score + '/100'}</div><div class="lbl">Индекс готовности ТЗ</div></div>` +
         `<div class="kpi"><div class="num">${s.total_requirements}</div><div class="lbl">Выделено требований</div></div>` +
         `<div class="kpi"><div class="num" style="color:var(--crit)">${s.critical_count}</div><div class="lbl">Критичных блокеров</div></div>` +
         `<div class="kpi"><div class="num" style="color:var(--maj)">${s.major_count}</div><div class="lbl">Существенных (Major)</div></div>` +
         `<div class="kpi"><div class="num" style="color:var(--min)">${s.minor_count}</div><div class="lbl">Незначительных (Minor)</div></div>`;
 
       document.getElementById('bizSummaryText').textContent =
-        `Выявлено ${s.critical_count} блокеров и ${s.total_defects} дефектов до написания кода — предотвращены переделки между бэкендом, мобильной разработкой и QA.`;
+        `Выявлено ${s.critical_count} блокеров и ${s.total_defects} дефектов до написания кода.`;
 
       document.getElementById('cntSet').textContent = r.set_defects.length;
       document.getElementById('cntAtomic').textContent = r.atomic_defects.length;
@@ -581,6 +581,9 @@ def create_web_server(
 
             try:
                 length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 16 * 1024 * 1024:
+                    self._send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "Допустимый размер запроса — до 16 МиБ."})
+                    return
                 raw_body = self.rfile.read(length)
                 req_json = json.loads(raw_body.decode("utf-8"))
                 filename = Path(str(req_json.get("filename") or "requirements.md")).name
@@ -589,13 +592,20 @@ def create_web_server(
                 if not content_b64:
                     self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Пустое содержимое файла"})
                     return
-                file_bytes = base64.b64decode(content_b64)
+                file_bytes = base64.b64decode(content_b64, validate=True)
             except Exception as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"Некорректный запрос: {exc}"})
                 return
 
             job_id = uuid.uuid4().hex[:12]
             with jobs_lock:
+                active = sum(entry["status"] in ("running", "queued") for entry in jobs.values())
+                if active >= 2:
+                    self._send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "Два задания уже обрабатываются."})
+                    return
+                completed = [key for key, entry in jobs.items() if entry["status"] in ("done", "error")]
+                for key in completed[:-7]:
+                    del jobs[key]
                 jobs[job_id] = {
                     "status": "running",
                     "logs": ["Файл принят сервером. Подготовка анализа..."],
