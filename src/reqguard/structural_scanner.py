@@ -289,12 +289,12 @@ _MONTH_NAMES = (
 
 def _check_accounting_month(doc: ParsedDocument) -> list[SetDefect]:
     rules = [line for line in doc.lines if re.search(
-        r"месяц определяется по дате (совершения|проведения) покупки", line.raw_text, re.I
+        r"(?:месяц определяется по дате|используется календарный месяц) (совершения|проведения) покупки", line.raw_text, re.I
     )]
     if len(rules) != 1:
         return []
     rule = rules[0]
-    purchase_date = "по дате совершения" in rule.raw_text.lower()
+    purchase_date = "совершения покупки" in rule.raw_text.lower()
     findings = []
     for table in doc.tables:
         if len(table.headers) != 3 or not any(word in table.headers[2].lower() for word in ("ожидаем", "результат")):
@@ -307,7 +307,13 @@ def _check_accounting_month(doc: ParsedDocument) -> list[SetDefect]:
                 continue
             event_text = initial if purchase_date else action
             months = [m for m, _ in _MONTH_NAMES if re.search(r"\b\d{1,2}\s+" + m + r"\b", event_text)]
-            expected_months = [m for m, adj in _MONTH_NAMES if re.search(adj + r"\s+сч[её]тчик вырос", expected)]
+            expected_months = []
+            nominatives = ("январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь")
+            for (month, adjective), name in zip(_MONTH_NAMES, nominatives):
+                if re.search(adjective + r"\s+сч[её]тчик вырос", expected) or re.search(
+                    r"расходы за " + name + r"\s+(?:выросли|увеличились)", expected
+                ):
+                    expected_months.append(month)
             if len(months) != 1 or len(expected_months) != 1 or months == expected_months:
                 continue
             findings.append(SetDefect(
@@ -393,19 +399,10 @@ def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
                         req_id=linked.report_id if linked else "REQ-00",
                         doc_id=linked.doc_id if linked else None,
                         criterion="VERIFIABLE",
-                        severity="MAJOR",
-                        problem=(
-                            "Нефункциональное требование ко времени отклика задано без статистического перцентиля "
-                            "(p95/p99/max), целевой нагрузки (RPS/TPS), момента старта таймера и политики ретраев при сбое."
-                        ),
-                        impact=(
-                            "Нагрузочное тестирование и приёмка SLA невозможны однозначно: единичный сетевой выброс "
-                            "либо сбой смежного сервиса трактуется двояко."
-                        ),
-                        recommendation=(
-                            "Указать метрику (например, p95 ≤ 60 с при пиковой нагрузке N событий/сек), точки измерения "
-                            "тайминга и поведение при недоступности downstream-сервиса (очередь ретраев / DLQ)."
-                        ),
+                        severity="MINOR",
+                        problem="В строке с предельным временем не указан профиль нагрузки или перцентиль.",
+                        impact="Для нагрузочного теста может потребоваться дополнительный профиль испытаний.",
+                        recommendation="Сохранить заданный предел. Уточнить применимость профиля нагрузки при планировании испытаний.",
                         evidence=[_make_span(dl)],
                         origin="STRUCTURAL",
                     )
@@ -451,8 +448,7 @@ def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
                 )
             )
 
-        if tbl.rows and all(all(not c.strip() for c in r.cells) for r in tbl.rows):
-            r0 = tbl.rows[0]
+        if "согласующ" in tbl.section_path.lower() and not any(c.strip() for r in tbl.rows for c in r.cells):
             set_defects.append(
                 SetDefect(
                     defect_id=next_sid(),
@@ -467,10 +463,10 @@ def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
                     evidence=[
                         SourceSpan(
                             line_start=tbl.line_start,
-                            line_end=r0.line_no,
-                            page=r0.page,
+                            line_end=tbl.line_end,
+                            page=tbl.page,
                             section_path=tbl.section_path,
-                            quote=doc.get_span_text(tbl.line_start, r0.line_no),
+                            quote=doc.get_span_text(tbl.line_start, tbl.line_end),
                             verified=True,
                         )
                     ],

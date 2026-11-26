@@ -47,13 +47,27 @@ class _LLMRawReq(BaseModel):
     quote: str
 
 
-class _LLMRawAtomicDefect(BaseModel):
+class _ModelFinding(BaseModel):
+    severity: Severity = "MAJOR"
+    blocked_decision: str = ""
+    impact: str
+
+    def assessed_severity(self) -> Severity:
+        if self.severity == "CRITICAL" and not self.blocked_decision.strip():
+            return "MAJOR"
+        return self.severity
+
+    def reported_impact(self) -> str:
+        if self.assessed_severity() == "CRITICAL":
+            return f"{self.impact.strip()} Блокируемое решение: {self.blocked_decision.strip()}"
+        return self.impact.strip()
+
+
+class _LLMRawAtomicDefect(_ModelFinding):
     temp_req_id: str = ""
     doc_id: str | None = None
     criterion: AtomicCriterion = "COMPLETE"
-    severity: Severity = "MAJOR"
     problem: str
-    impact: str
     recommendation: str
     suggested_fix: str | None = None
     line_start: int
@@ -72,13 +86,11 @@ class _LLMRawQuote(BaseModel):
     quote: str
 
 
-class _LLMRawSetDefect(BaseModel):
+class _LLMRawSetDefect(_ModelFinding):
     related_req_ids: list[str] = Field(default_factory=list)
     criterion: SetCriterion = "CONSISTENT"
-    severity: Severity = "MAJOR"
     title: str
     problem: str
-    impact: str
     question_for_analyst: str
     recommendation: str
     evidence: list[_LLMRawQuote] = Field(min_length=1)
@@ -319,9 +331,9 @@ def run_audit_pipeline(
                 req_id=resolved_req_id,
                 doc_id=req_obj.doc_id if req_obj else raw_ad.doc_id,
                 criterion=raw_ad.criterion,
-                severity=raw_ad.severity,
+                severity=raw_ad.assessed_severity(),
                 problem=raw_ad.problem.strip(),
-                impact=raw_ad.impact.strip(),
+                impact=raw_ad.reported_impact(),
                 recommendation=raw_ad.recommendation.strip(),
                 suggested_fix=raw_ad.suggested_fix.strip() if raw_ad.suggested_fix else None,
                 evidence=[
@@ -353,10 +365,10 @@ def run_audit_pipeline(
                 defect_id=f"DEF-S{idx:02d}",
                 related_req_ids=sorted(set(cleaned_rel)),
                 criterion=raw_sd.criterion,
-                severity=raw_sd.severity,
+                severity=raw_sd.assessed_severity(),
                 title=raw_sd.title.strip(),
                 problem=raw_sd.problem.strip(),
-                impact=raw_sd.impact.strip(),
+                impact=raw_sd.reported_impact(),
                 question_for_analyst=raw_sd.question_for_analyst.strip(),
                 recommendation=(
                     "Уточнить у владельца документа: " + raw_sd.question_for_analyst.strip()

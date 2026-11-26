@@ -123,6 +123,17 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Для запуска проверки укажите два аргумента: input_path и output_path (или используйте --serve).")
 
     try:
+        paths = [args.input_path, args.output_path]
+        if args.with_html and args.output_path.suffix.lower() != ".html":
+            paths.append(args.output_path.with_suffix(".html"))
+        if args.json_path:
+            paths.append(args.json_path)
+        for i, path in enumerate(paths):
+            for previous in paths[:i]:
+                if path.resolve() == previous.resolve() or (
+                    path.exists() and previous.exists() and path.samefile(previous)
+                ):
+                    raise ValueError(f"Пути входа и результатов должны различаться: {path}")
         settings = load_settings(args.env_file)
         if args.structural_only:
             settings.provider = "none"

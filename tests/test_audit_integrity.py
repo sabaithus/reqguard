@@ -152,3 +152,35 @@ def test_submission_bundle_is_atomic_and_requires_complete_run(tmp_path):
     assert (destination / "input" / source.name).read_bytes() == source.read_bytes()
     with pytest.raises(ValueError, match="существует"):
         module.prepare(source, destination)
+
+
+@pytest.mark.parametrize("collision", ["source", "json-source", "json-markdown", "json-html"])
+def test_colliding_output_paths_preserve_input(tmp_path, collision):
+    source = tmp_path / "input.md"
+    source.write_bytes(b"source")
+    out = source if collision == "source" else tmp_path / "out.md"
+    json_path = {"json-source": source, "json-markdown": out, "json-html": out.with_suffix(".html")}.get(collision, tmp_path / "out.json")
+    args = [str(source), str(out), "--with-html", "--json", str(json_path), "--structural-only"]
+    assert main(args) == 2
+    assert source.read_bytes() == b"source"
+    assert list(tmp_path.iterdir()) == [source]
+
+
+def test_latency_finding_preserves_explicit_start_and_bound(tmp_path):
+    source = tmp_path / "archive.md"
+    source.write_text("## Нефункциональные требования\nСервис подтверждает запись не более 2 секунд после получения запроса.", encoding="utf8")
+    findings = run_structural_scan(parse_document(source)).atomic_defects
+    sla = next(d for d in findings if d.criterion == "VERIFIABLE")
+    assert "момента старта" not in sla.problem
+    assert "60" not in sla.recommendation
+    assert sla.severity == "MINOR"
+
+
+def test_model_critical_requires_blocked_decision():
+    from reqguard.pipeline import _LLMRawAtomicDefect
+    finding = _LLMRawAtomicDefect(severity="CRITICAL", problem="Недостаточно данных", impact="Два результата",
+                                  recommendation="Согласовать результат", line_start=1, line_end=1, quote="условие")
+    assert finding.assessed_severity() == "MAJOR"
+    finding.blocked_decision = "Отнести событие к текущему или предыдущему периоду?"
+    assert finding.assessed_severity() == "CRITICAL"
+    assert finding.blocked_decision in finding.reported_impact()
