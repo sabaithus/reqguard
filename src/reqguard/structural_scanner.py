@@ -337,41 +337,46 @@ def _check_accounting_month(doc: ParsedDocument) -> list[SetDefect]:
 def _check_notification_limit(doc: ParsedDocument) -> list[SetDefect]:
     """Ограниченная проверка пары правил об одном канале, карте и месяце."""
     findings = []
-    quota = re.compile(r"(?:максимум|не (?:более|больше))\s+(?:один|одного|1)\s+(?:тако(?:й|го)\s+)?(?:push|пуш)", re.I)
-    repeats = re.compile(r"(?:достижение|пересечение)[^.!?]{0,65}(?:вызывает|приводит к)\s+(?:push|пуш)", re.I)
+    channel = r"(?:push|пуш|sms|смс)"
+    quota = re.compile(r"(?:максимум|не (?:более|больше))\s+(?:один|одного|одно|1)\s+(?:тако(?:й|го|е)\s+)?(" + channel + r")\b", re.I)
+    repeat = re.compile(r"(?:достижение|пересечение)[^.!?]{0,65}(?:вызывает|приводит к)\s+(" + channel + r")\b", re.I)
     independent = re.compile(r"(?:независимо|вне зависимости)\s+от[^.!?]{0,95}(?:настройк|уведомлен|отправк)", re.I)
-    exception = re.compile(r"приоритет|исключени|кроме|с уч[её]том.{0,40}(?:лимита|ограничения)|если.{0,35}(?:ещ[её] не|не был)|повторн\w* (?:push|пуш) не", re.I)
-    if any(exception.search(line.raw_text) and re.search(r"порог|месячн\w* (?:лимит|ограничен)|повторн\w* (?:push|пуш)", line.raw_text, re.I)
+    exception = re.compile(r"приоритет|исключени|кроме|с уч[её]том.{0,40}(?:лимита|ограничения)|если.{0,35}(?:ещ[её] не|не был)|повторн\w* " + channel + r" не", re.I)
+    if any(exception.search(line.raw_text) and re.search(r"порог|лимит|отправк|уведомлен", line.raw_text, re.I)
            for line in doc.lines if line.kind in ("text", "list_item", "table_row")):
         return []
     for cap in doc.lines:
         text = cap.raw_text.lower()
-        if not (quota.search(text) and "карт" in text and "месяц" in text):
+        limit = quota.search(text)
+        periods = [p for marker, p in (("месяц", "месяц"), ("недел", "неделю"), ("сутк", "сутки")) if marker in text]
+        if not limit or len(periods) != 1 or "карт" not in text:
             continue
-        if re.search(r"(?:push|пуш)\s+(?:о|об|для|при)\s+", text) and "порог" not in text:
+        media = limit.group(1)
+        if re.search(channel + r"\s+(?:о|об|для|при)\s+", text) and not re.search(r"порог|лимит", text):
             continue
         section = [line for line in doc.lines if line.section_path == cap.section_path and line.kind in ("list_item", "text")]
-        # Отдельная оговорка о приоритете требует смыслового ревью всей секции.
         if any(exception.search(line.raw_text) for line in section):
             continue
         for reset in section:
             rule = reset.raw_text.lower()
-            if cap == reset or not ("порог" in rule and repeats.search(rule) and independent.search(rule)):
+            event = repeat.search(rule)
+            parameter = re.search(r"(?:изменени|смен)[а-я]*\s+(порог|лимит)а", rule)
+            if cap == reset or not parameter or not event or not independent.search(rule) or media != event.group(1).lower():
                 continue
-            if not re.search(r"(?:изменени|смен)[а-я]*\s+порога", rule):
-                continue
+            period = periods[0]
+            name = parameter.group(1)
             findings.append(SetDefect(
                 defect_id="notification-limit", criterion="CONSISTENT", severity="CRITICAL",
-                title="Месячный лимит и повторное достижение порога задают разные исходы",
-                problem="Если карта уже получила push в этом месяце, месячный лимит запрещает следующий. Правило смены настройки требует push при новом достижении порога независимо от прежней настройки.",
-                impact="Разработчик и QA могут выбрать разные ожидаемые количества уведомлений для одной последовательности событий.",
-                question_for_analyst="Должна ли эта же карта получить второй push в том же месяце после повышения и последующего достижения нового порога?",
-                recommendation="Зафиксировать приоритет правил и добавить сценарий повторного достижения порога.",
+                title=f"Лимит отправок за {period} и повторное достижение настройки задают разные исходы",
+                problem=f"Для одной карты ограничена частота {media} за {period}. После смены настройки второе правило требует отправку независимо от её истории.",
+                impact="Для одной последовательности событий QA получает два несовместимых ожидаемых результата.",
+                question_for_analyst=f"При новом достижении настройки нужно ли отправить второе {media} по этой карте за {period}?",
+                recommendation="Зафиксировать приоритет правил и проверить повторное событие.",
                 decision=DecisionScenario(
-                    scenario="Одна карта уже получила push. В том же месяце порог повышают выше накопленной суммы. Следующая покупка доводит расходы до нового порога.",
-                    alternatives=("Сохранить месячный лимит карты. Всего за месяц один push.",
-                                  "Разрешить повторную отправку после смены порога. Всего за месяц два push."),
-                    acceptance_check="Воспроизвести эту последовательность для одной карты и сравнить количество отправок с выбранным исходом.",
+                    scenario=f"По карте уже была отправка {media}. В том же периоде {name} повышают выше накопленной суммы. Затем сумма достигает нового значения.",
+                    alternatives=(f"За {period} по карте остаётся одна отправка {media}.",
+                                  f"После смены настройки допускается вторая отправка {media} за {period}."),
+                    acceptance_check=f"Для одной карты повторить сценарий и сравнить число отправок {media} с согласованным исходом.",
                 ),
                 evidence=[_make_span(cap), _make_span(reset)], origin="STRUCTURAL",
             ))
@@ -652,19 +657,14 @@ def _scan_rest_api_contracts(
                         title="Мутирующая операция сохранения состояния реализована через HTTP GET и Query-параметры",
                         problem=(
                             f"Метод API с типом `REST type: GET` ({url_val}) выполняет изменение данных в хранилище "
-                            f"(«{desc_val}») и передаёт идентификатор карты и сумму через URL query-параметры."
+                            f"(«{desc_val}») при обращении к этому ресурсу."
                         ),
                         impact=(
                             "Нарушение RFC 9110 (GET обязан быть безопасным без побочных эффектов): риск случайного вызова "
-                            "прокси/предзагрузкой, некорректного кеширования и утечки платёжных идентификаторов (`cardId`, `amount`) в access-логи серверов."
+                            "прокси/предзагрузкой, некорректного кеширования ответа."
                         ),
-                        question_for_analyst=(
-                            "Разрешено ли перевести сохранение настроек на `PUT` / `POST` с JSON-телом и выделить отдельный `GET`-метод только для чтения?"
-                        ),
-                        recommendation=(
-                            "Разделить API на два метода: `GET` для чтения текущих настроек и расходов карты и `PUT` (или `POST`) "
-                            "с передачей параметров в JSON Request Body для сохранения порога."
-                        ),
+                        question_for_analyst="Какой метод и контракт определяют чтение и сохранение настройки?",
+                        recommendation="Согласовать назначение операции, HTTP-метод и пример запроса с владельцем API.",
                         evidence=spans,
                         origin="STRUCTURAL",
                     )
@@ -684,11 +684,11 @@ def _scan_rest_api_contracts(
                 related_req_ids=[],
                 criterion="COMPLETE_SET",
                 severity="MINOR",
-                title="Не указаны промышленный URL (Prod) и ссылка на спецификацию Swagger/OpenAPI",
-                problem="В параметрах REST API отсутствует маршрут для промышленного контура (`Prod: —`) и ссылка на контракт Swagger (`—`).",
-                impact="Интеграция мобильного приложения для промышленного релиза требует дополнительного согласования маршрутизации API Gateway и версионирования (`/v1/...`).",
-                question_for_analyst="Какой базовый путь и префикс версии API используется на промышленном контуре (Prod)?",
-                recommendation="Зафиксировать единый относительный маршрут с версией API (например, `/api/v1/cards/{cardId}/spending-alert`) и приложить OpenAPI-схему.",
+                title="В метаданных API остались незаполненные поля",
+                problem="Не заполнены значения в строках: " + ", ".join(row.cells[0] for row in missing_api_meta) + ".",
+                impact="Интегратору требуется подтвердить актуальные значения перед подключением.",
+                question_for_analyst="Где интегратор может получить значения, пропущенные в отмеченных строках контракта?",
+                recommendation="Заполнить указанные поля или дать ссылку на согласованный источник.",
                 evidence=[
                     SourceSpan(
                         line_start=r.line_no,

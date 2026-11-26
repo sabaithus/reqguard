@@ -233,6 +233,7 @@ def render_markdown_report(report: AuditReport) -> str:
     out.append(f"- **Готовность к передаче в разработку:** **{dev_status}**")
     out.append(f"- **Готовность к проектированию приёмочных тестов (QA):** **{qa_status}**")
     out.append(f"- **Обоснование:** {s.verdict_rationale}")
+    out.append(f"- **Расчёт индекса:** {s.score_explanation}")
     out.append("")
 
     if s.priority_fixes:
@@ -242,4 +243,28 @@ def render_markdown_report(report: AuditReport) -> str:
             out.append(f"{idx}. {fix}")
         out.append("")
 
+    if p.critic_status != "off":
+        out.extend(["", "## Контрольный проход модели", "", f"Статус: {p.critic_status}"])
+        for note in report.critic_notes:
+            out.append(f"- {note.action} · {note.problem} — {note.reason} ({note.evidence.format_locator()}): {note.evidence.quote}")
+    if report.accepted_decisions:
+        out.extend(["", "## Принятые решения владельца", "", f"SHA-256 документа: `{p.source_sha256}`", ""])
+        for accepted in report.accepted_decisions:
+            issue = accepted.finding
+            out.append(f"- {issue.defect_id} · {issue.question_for_analyst} **{accepted.outcome}** ({accepted.exported_at})")
+            out.append(f"  - После согласования QA проверяет: {issue.decision.acceptance_check}")
+            out.extend(f"  - {span.format_locator()} — {span.quote}" for span in issue.evidence)
+    out.extend(["", "## Вопросы владельцу продукта", ""])
+    for question, issues in report.owner_questions():
+        out.append(f"### {question}")
+        for issue in issues:
+            out.append(f"- {issue.defect_id} · {issue.severity}")
+            for span in issue.evidence:
+                out.append(f"  - {span.format_locator()} — {span.quote}")
+            decision = getattr(issue, "decision", None)
+            if decision:
+                out.extend(f"  - Вариант {i}. {v}" for i, v in enumerate(decision.alternatives, 1))
+                out.append(f"  - Проверка QA после выбора: {decision.acceptance_check}")
+    if not report.owner_questions():
+        out.append("Открытых вопросов в результате этой проверки нет.")
     return "\n".join(out)

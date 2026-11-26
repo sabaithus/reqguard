@@ -26,11 +26,11 @@ def prepare(source: Path, destination: Path) -> None:
         shutil.copyfile(source, snapshot)
         data = bundle / "report.json"
         result = run_agent([str(snapshot), str(bundle / "report.md"), "--json", str(data), "--with-html"])
-        if result:
+        if result not in (0, 1, 3):
             raise ValueError("Прогон агента не завершён. Комплект не сформирован.")
         report = json.loads(data.read_text(encoding="utf-8"))
         passport = report["passport"]
-        if passport["analysis_status"] != "complete" or not passport["llm_calls_count"]:
+        if result == 3 or passport["analysis_status"] != "complete" or not passport["llm_calls_count"]:
             raise ValueError(f"Проверка неполная ({passport['analysis_status']}). Комплект не сформирован.")
         if passport["source_sha256"] != hashlib.sha256(snapshot.read_bytes()).hexdigest():
             raise ValueError("Отпечаток входа отличается от паспорта.")

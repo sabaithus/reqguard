@@ -26,7 +26,7 @@ def test_no_requirements_never_authorize_development(tmp_path):
     source = tmp_path / "source.txt"
     source.write_text("банан", encoding="utf8")
     out = tmp_path / "report.json"
-    assert main([str(source), str(tmp_path / "report.md"), "--json", str(out), "--structural-only"]) == 0
+    assert main([str(source), str(tmp_path / "report.md"), "--json", str(out), "--structural-only"]) == 3
     result = json.loads(out.read_text(encoding="utf8"))
     assert result["passport"]["analysis_status"] == "insufficient_input"
     assert result["summary"]["readiness_score"] is None

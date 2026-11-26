@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from reqguard.config import load_settings
-from reqguard.models import AuditReport
+from reqguard.models import AuditReport, OwnerProtocol
 from reqguard.pipeline import run_audit_pipeline
 from reqguard.reporter_html import render_html_report
 from reqguard.reporter_md import render_markdown_report
@@ -197,6 +197,7 @@ STUDIO_HTML = r"""<!DOCTYPE html>
         <div class="btn-row">
           <button class="btn primary" id="runBtn" disabled>Запустить аудит</button>
           <button class="btn" id="loadLatestBtn" style="display:none">Открыть сохранённый отчёт</button>
+          <label class="btn">Протокол решений <input type="file" id="answersInput" accept=".json"></label>
         </div>
       </div>
     </div>
@@ -273,6 +274,9 @@ STUDIO_HTML = r"""<!DOCTYPE html>
     }
     dropzone.onclick = () => fileInput.click();
     fileInput.onchange = e => setFile(e.target.files[0]);
+    document.getElementById('answersInput').onchange = e => {
+      runBtn.textContent = e.target.files.length ? 'Перепроверить с ответами' : 'Запустить аудит';
+    };
     dropzone.ondragover = e => { e.preventDefault(); dropzone.classList.add('drag'); };
     dropzone.ondragleave = () => dropzone.classList.remove('drag');
     dropzone.ondrop = e => { e.preventDefault(); dropzone.classList.remove('drag'); setFile(e.dataTransfer.files[0]); };
@@ -319,6 +323,8 @@ STUDIO_HTML = r"""<!DOCTYPE html>
           body: JSON.stringify({
             filename: state.file.name,
             content_base64: b64,
+            answers: document.getElementById('answersInput').files.length
+              ? JSON.parse(await document.getElementById('answersInput').files[0].text()) : null,
             structural_only: document.getElementById('structuralOnly').checked
           })
         });
@@ -552,7 +558,7 @@ def create_web_server(
                 return
 
             if path == "/api/latest":
-                for rel in ("submission_ready/report.json", "runs/report.json"):
+                for rel in ("output/submission/report.json", "runs/report.json", "examples/8d48b6a/report.json"):
                     candidate = root_dir / rel
                     if candidate.exists():
                         try:
@@ -602,6 +608,7 @@ def create_web_server(
                 filename = Path(str(req_json.get("filename") or "requirements.md")).name
                 content_b64 = str(req_json.get("content_base64") or "")
                 structural_only = bool(req_json.get("structural_only", False))
+                answers = OwnerProtocol.model_validate(req_json["answers"]) if req_json.get("answers") is not None else None
                 if not content_b64:
                     self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Пустое содержимое файла"})
                     return
@@ -642,6 +649,7 @@ def create_web_server(
                             settings=settings,
                             progress_cb=_log,
                             allow_structural_only=structural_only,
+                            answers=answers,
                         )
                     md_text = render_markdown_report(report)
                     html_text = render_html_report(report)

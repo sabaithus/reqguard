@@ -12,11 +12,13 @@ from typing import Callable
 from pydantic import BaseModel, Field
 
 from reqguard.config import LLMSettings, detect_agent_version
+from reqguard.critic import review_candidates
 from reqguard.llm_client import LLMGatewayError, ResilientLLMClient
 from reqguard.models import (
     AtomicCriterion,
     AtomicDefect,
     AuditReport,
+    OwnerProtocol,
     DecisionScenario,
     RequirementCategory,
     RequirementItem,
@@ -208,6 +210,8 @@ def run_audit_pipeline(
     settings: LLMSettings,
     progress_cb: Callable[[str], None] | None = None,
     allow_structural_only: bool = False,
+    answers: OwnerProtocol | None = None,
+    critic: bool = False,
 ) -> AuditReport:
     """Выполняет полный цикл проверки документа и возвращает верифицированный отчёт."""
     t0 = time.perf_counter()
@@ -218,6 +222,8 @@ def run_audit_pipeline(
 
     notify("Шаг 1/5: Чтение документа и построение индексированного AST...")
     doc = parse_document(input_path)
+    if answers and answers.source_sha256 != doc.sha256:
+        raise ValueError("Протокол относится к другой версии входного файла (SHA-256).")
     numbered_text = doc.render_numbered_text()
 
     notify("Шаг 2/5: Детерминированный структурный и контрактный пре-анализ...")
@@ -263,6 +269,12 @@ def run_audit_pipeline(
         notify(f"Шаг 4/5: LLM Фаза 2 ({settings.provider}:{llm_client.last_used_model}) — перекрёстная проверка набора и трассировка приёмки (ISO 29148 п. 5.2.6 / IEEE 830)...")
         catalog_str = _format_req_catalog(requirements)
         pass2_prompt = build_pass2_set_prompt(numbered_text, catalog_str)
+        if answers:
+            known = [a.selected_outcome for a in answers.selected()
+                     if any(a.matches(d) for d in structural.set_defects)]
+            if known:
+                pass2_prompt += ("\nПринятые допущения владельца для отдельно отмеченных сценариев: "
+                                 + "\n".join(known) + "\nПроверь исходный текст полностью. Верни и исходные противоречия для сверки с протоколом.")
         pending = {r.report_id for r in requirements if not r.model_reviewed}
         if pending:
             pass2_prompt += (
@@ -420,10 +432,22 @@ def run_audit_pipeline(
     elif analysis_status == "complete" and doc.unreadable_pages:
         analysis_status = "partial_document"
 
+    critic_status = "off"
+    notes = []
+    if critic and settings.provider != "none" and analysis_status == "complete":
+        notify("Контрольный проход модели: проверка контрцитат к замечаниям.")
+        try:
+            candidate_atomic, candidate_set, notes = review_candidates(doc, llm_client, candidate_atomic, candidate_set, notify)
+            critic_status = "completed"
+        except (LLMGatewayError, ValueError):
+            critic_status = "failed"
+            analysis_status = "coverage_incomplete"
+            notify("Критик не завершил проверку. Сохранены исходные замечания.")
     duration = round(time.perf_counter() - t0, 2)
     passport = RunPassport(
         document_title=doc.title,
         source_file=doc.source_path.name,
+        critic_status=critic_status,
         source_format=doc.source_format,
         source_sha256=doc.sha256,
         analysis_status=analysis_status,
@@ -440,11 +464,14 @@ def run_audit_pipeline(
         token_usage=llm_client.token_usage,
     )
 
-    return build_verified_audit_report(
+    report = build_verified_audit_report(
         doc=doc,
         passport=passport,
         requirements=requirements,
         candidate_atomic=candidate_atomic,
         candidate_set=candidate_set,
         initial_filtered_count=dropped_reqs,
+        answers=answers,
     )
+    report.critic_notes = notes
+    return report

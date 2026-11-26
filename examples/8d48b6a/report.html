@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReqGuard Отчёт — Уведомление о расходах по карте</title>
+  <style>
+    :root {
+      --bg: #0f172a; --panel: #1e293b; --border: #334155; --text: #f1f5f9; --muted: #94a3b8;
+      --crit: #ef4444; --maj: #f59e0b; --min: #3b82f6; --ok: #10b981; --accent: #38bdf8;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.55; }
+    .container { max-width: 1220px; margin: 0 auto; padding: 28px 20px 60px; }
+    .hero { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid var(--border); border-radius: 14px; padding: 24px; margin-bottom: 24px; }
+    .verdict-banner { display: inline-block; padding: 6px 14px; border-radius: 999px; font-weight: 700; font-size: 13px; background: #dc2626; color: #fff; margin-bottom: 10px; }
+    h1 { margin: 6px 0 12px; font-size: 26px; }
+    h2 { margin-top: 34px; border-bottom: 1px solid var(--border); padding-bottom: 8px; font-size: 20px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 14px; margin: 20px 0; }
+    .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .kpi .num { font-size: 28px; font-weight: 800; }
+    .kpi .lbl { font-size: 13px; color: var(--muted); }
+    .passport { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; }
+    .filters { display: flex; gap: 10px; margin: 16px 0; flex-wrap: wrap; }
+    .filter-btn { background: var(--panel); color: var(--text); border: 1px solid var(--border); padding: 7px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .filter-btn.active { border-color: var(--accent); color: var(--accent); }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+    .card-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .sev-pill { padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 700; color: #fff; }
+    .sev-pill.critical { background: var(--crit); }
+    .sev-pill.major { background: var(--maj); color: #111827; }
+    .sev-pill.minor { background: var(--min); }
+    .def-id { font-family: monospace; font-weight: 700; color: var(--accent); }
+    .crit-tag, .origin-tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: #0f172a; border: 1px solid var(--border); color: var(--muted); }
+    .ev-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; margin: 12px 0; }
+    .ev-box { background: #0b1120; border-left: 3px solid var(--accent); padding: 10px 12px; border-radius: 6px; }
+    .ev-loc { font-size: 12px; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+    .ev-quote { margin: 0; white-space: pre-wrap; font-family: Consolas, monospace; font-size: 12.5px; color: #e2e8f0; }
+    .analyst-q { background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.35); padding: 10px 14px; border-radius: 8px; margin: 10px 0; }
+    .fix-box { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.35); padding: 10px 14px; border-radius: 8px; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 10px; overflow: hidden; font-size: 13.5px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: #0b1120; color: var(--muted); font-weight: 600; }
+    .quote { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .muted { color: var(--muted); }
+    code { background: #0b1120; padding: 2px 6px; border-radius: 4px; color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <div class="verdict-banner">НЕ ГОТОВО К РАЗРАБОТКЕ И ТЕСТИРОВАНИЮ (ЕСТЬ КРИТИЧНЫЕ БЛОКЕРЫ)</div>
+      <h1>Аудит качества ТЗ: «Уведомление о расходах по карте»</h1>
+      <p>Обе фазы завершены. До начала работ согласуйте блокирующие замечания: DEF-S01, DEF-S02, DEF-S03, DEF-A01, DEF-A02, DEF-A03.</p>
+      <div class="passport">
+        <span>Файл: <strong>requirements.pdf</strong> (PDF, 144 строк)</span>
+        <span>Модель: <strong>gemini / gemini-3.6-flash</strong></span>
+        <span>Версия агента: <strong>v1.3.0 (8d48b6a)</strong></span>
+        <span>Верифицировано цитат: <strong>66</strong> (отклонено записей: 3)</span>
+        <span>Время: <strong>45.20 с</strong></span>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi"><div class="num">24/100</div><div class="lbl">Индекс готовности ТЗ</div></div>
+      <div class="kpi"><div class="num">21</div><div class="lbl">Выделено требований</div></div>
+      <div class="kpi"><div class="num" style="color:var(--crit)">6</div><div class="lbl">Критичных блокеров</div></div>
+      <div class="kpi"><div class="num" style="color:var(--maj)">9</div><div class="lbl">Существенных (Major)</div></div>
+      <div class="kpi"><div class="num" style="color:var(--min)">7</div><div class="lbl">Незначительных (Minor)</div></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Что исправить в первую очередь до старта разработки</h3>
+      <ol><li>[DEF-S01] Месяц в критерии приёмки расходится с правилом учёта: Согласовать правило и пример, затем повторить проверку на границе месяцев.</li><li>[DEF-S02] Мутирующая операция сохранения состояния реализована через HTTP GET и Query-параметры: Разделить API на два метода: `GET` для чтения текущих настроек и расходов карты и `PUT` (или `POST`) с передачей параметров в JSON Request Body для сохранения порога.</li><li>[DEF-S03] Конфликт HTTP-статусов и схемы ошибок при невалидных параметрах (200 OK с ERROR vs 400 Bad Request): Для ошибок валидации входных параметров возвращать `400 Bad Request` (или `422`) с единой JSON-структурой ошибки; код `200 OK` оставить строго для успешного выполнения (убрав ошибочную приписку `Created`, относящуюся к `201`).</li><li>[DEF-A01 / REQ-05 (Ф-2)] Четко зафиксировать, какой именно статус и штамп времени транзакции (дата авторизации или дата клиринга) используется для финансового учета месяца.</li><li>[DEF-A02 / REQ-09] Указать метрику (например, p95 ≤ 60 с при пиковой нагрузке N событий/сек), точки измерения тайминга и поведение при недоступности downstream-сервиса (очередь ретраев / DLQ).</li><li>[DEF-A03 / REQ-11] Указать уникальный ключ идемпотентности для обработки событий процессинга.</li></ol>
+    </div>
+
+    <div class="filters">
+      <button class="filter-btn active" onclick="filterCards('ALL', this)">Все нарушения (22)</button>
+      <button class="filter-btn" onclick="filterCards('CRITICAL', this)">Критичные блокеры (6)</button>
+      <button class="filter-btn" onclick="filterCards('MAJOR', this)">Существенные (9)</button>
+      <button class="filter-btn" onclick="filterCards('MINOR', this)">Незначительные (7)</button>
+    </div>
+
+    <h2>Проверка всего набора требований и контрактов (11)</h2>
+    
+            <div class="card defect-card" data-sev="CRITICAL">
+              <div class="card-header">
+                <span class="sev-pill critical">Критичный (Блокер)</span>
+                <span class="def-id">DEF-S01</span>
+                <span class="crit-tag">Согласованность правил и критериев приёмки (IEEE 830 п. 4.3)</span>
+                <span class="origin-tag">STRUCTURAL</span>
+              </div>
+              <h3>Месяц в критерии приёмки расходится с правилом учёта</h3>
+              <p class="meta-rel">Затронуто: <code>REQ-05, REQ-13</code></p>
+              <div class="ev-grid"><div class='ev-box'><div class='ev-loc'>Стр. 1, строка 26 (Часть A. Новый функционал → Требования к изменениям → Функциональные требования)</div><pre class='ev-quote'>• Ф-2. Месяц определяется по дате совершения покупки в Алматы. В расходы входят проведённые покупки. Возврат уменьшает расходы месяца исходной покупки. Переводы и снятие наличных исключаются.</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 2, строка 44 (Часть A. Новый функционал → Критерии приемки)</div><pre class='ev-quote'>| Покупка 31 января в 23:58 на 4 000 ₸ | Провести 1 февраля в 00:03 по Алматы | Февральский счётчик вырос на 4 000 ₸ |</pre></div></div>
+              <p><strong>Проблема:</strong> Дата события по правилу: «покупка 31 января в 23:58 на 4 000 ₸». В ожидаемом результате указан другой месяц: «февральский счётчик вырос на 4 000 ₸».</p>
+              <p><strong>Бизнес- и тех. риск:</strong> Одна реализация не может одновременно пройти этот пример и выполнить правило учёта.</p>
+              <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> Какой источник следует исправить: правило выбора даты или ожидаемый результат?</div>
+              <p><strong>Рекомендация:</strong> Согласовать правило и пример, затем повторить проверку на границе месяцев.</p>
+            </div>
+            
+            <div class="card defect-card" data-sev="CRITICAL">
+              <div class="card-header">
+                <span class="sev-pill critical">Критичный (Блокер)</span>
+                <span class="def-id">DEF-S02</span>
+                <span class="crit-tag">Целостность контрактов (UI ↔ Логика ↔ БД ↔ REST API)</span>
+                <span class="origin-tag">HYBRID</span>
+              </div>
+              <h3>Мутирующая операция сохранения состояния реализована через HTTP GET и Query-параметры</h3>
+              <p class="meta-rel">Затронуто: <code>REQ-15</code></p>
+              <div class="ev-grid"><div class='ev-box'><div class='ev-loc'>Стр. 3, строки 78–79 (Часть B. REST API → Общие параметры)</div><pre class='ev-quote'>| Description | Сохранение порога. Функциональные требования: чтение порога |
+| REST type | GET |</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 3, строка 84 (Часть B. REST API → Общие параметры)</div><pre class='ev-quote'>| CURL | curl -G &quot;$BASE/alerts/saveLimit&quot; -H &quot;Authorization: Bearer $TOKEN&quot; --data &#x27;cardId=demo-42&amp;amount=50000&amp;enabled=1&#x27; |</pre></div></div>
+              <p><strong>Проблема:</strong> Метод API с типом `REST type: GET` (Dev: /alerts/saveLimit . Prod: —) выполняет изменение данных в хранилище («Сохранение порога. Функциональные требования: чтение порога») и передаёт идентификатор карты и сумму через URL query-параметры.</p>
+              <p><strong>Бизнес- и тех. риск:</strong> Нарушение RFC 9110 (GET обязан быть безопасным без побочных эффектов): риск случайного вызова прокси/предзагрузкой, некорректного кеширования и утечки платёжных идентификаторов (`cardId`, `amount`) в access-логи серверов.</p>
+              <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> Разрешено ли перевести сохранение настроек на `PUT` / `POST` с JSON-телом и выделить отдельный `GET`-метод только для чтения?</div>
+              <p><strong>Рекомендация:</strong> Разделить API на два метода: `GET` для чтения текущих настроек и расходов карты и `PUT` (или `POST`) с передачей параметров в JSON Request Body для сохранения порога.</p>
+            </div>
+            
+            <div class="card defect-card" data-sev="CRITICAL">
+              <div class="card-header">
+                <span class="sev-pill critical">Критичный (Блокер)</span>
+                <span class="def-id">DEF-S03</span>
+                <span class="crit-tag">Непротиворечивость набора (ISO 29148 п. 5.2.6 / IEEE 830 п. 4.3)</span>
+                <span class="origin-tag">STRUCTURAL</span>
+              </div>
+              <h3>Конфликт HTTP-статусов и схемы ошибок при невалидных параметрах (200 OK с ERROR vs 400 Bad Request)</h3>
+              <p class="meta-rel">Затронуто: <code>REQ-21</code></p>
+              <div class="ev-grid"><div class='ev-box'><div class='ev-loc'>Стр. 4, строка 128 (Часть B. REST API → Статусы → 200. Successful — Created)</div><pre class='ev-quote'>### 200. Successful — Created</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 4, строка 131 (Часть B. REST API → Статусы → 200. Successful — Created)</div><pre class='ev-quote'>{&quot;result&quot;:&quot;ERROR&quot;,&quot;message&quot;:&quot;Проверьте сумму&quot;}</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 4, строка 136 (Часть B. REST API → Статусы → 400. Unsuccessful — Bad request)</div><pre class='ev-quote'>{&quot;message&quot;:&quot;Некорректный запрос&quot;}</pre></div></div>
+              <p><strong>Проблема:</strong> В секции `200. Successful — Created` (где также смешаны семантика `200 OK` и `201 Created`) приведён возврат ошибки валидации суммы `{&quot;result&quot;:&quot;ERROR&quot;,&quot;message&quot;:&quot;Проверьте сумму&quot;}` со статусом 200, тогда как для неверно заполненных параметров запроса отдельно определён статус `400 Bad Request` со схемой без поля `result`.</p>
+              <p><strong>Бизнес- и тех. риск:</strong> Фронтенд и QA не знают, какой HTTP-код (200 или 400) и какую JSON-схему ожидать при вводе суммы вне диапазона 1 000–1 000 000 ₸.</p>
+              <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> Какой единый HTTP-статус (400/422 или бизнес-200) и единый формат тела ошибки должен возвращаться при отклонении суммы?</div>
+              <p><strong>Рекомендация:</strong> Для ошибок валидации входных параметров возвращать `400 Bad Request` (или `422`) с единой JSON-структурой ошибки; код `200 OK` оставить строго для успешного выполнения (убрав ошибочную приписку `Created`, относящуюся к `201`).</p>
+            </div>
+            
+            <div class="card defect-card" data-sev="MAJOR">
+              <div class="card-header">
+                <span class="sev-pill major">Существенный</span>
+                <span class="def-id">DEF-S04</span>
+                <span class="crit-tag">Целостность контрактов (UI ↔ Логика ↔ БД ↔ REST API)</span>
+                <span class="origin-tag">LLM</span>
+              </div>
+              <h3>Несоответствие состава полей push-уведомления между требованиями к данным и Sequence Diagram</h3>
+              <p class="meta-rel">Затронуто: <code>REQ-06, REQ-08, REQ-10</code></p>
+              <div class="ev-grid"><div class='ev-box'><div class='ev-loc'>Стр. 1, строка 30 (Часть A. Новый функционал → Sequence Diagram)</div><pre class='ev-quote'>Процессинг → сервис расходов: проведена покупка. Сервис расходов → настройки: получить порог карты. Сервис расходов → push: передать последние четыре цифры карты и сумму при достижении порога.</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 2, строка 34 (Часть A. Новый функционал → Требования к данным)</div><pre class='ev-quote'>Хранить идентификатор карты, месяц, идентификатор операции, сумму покупки в тиынах, признак отправки и порог в тенге.</pre></div></div>
+              <p><strong>Проблема:</strong> Согласно Sequence Diagram (строка 30), Сервис расходов передаёт в Сервис push «последние четыре цифры карты и сумму при достижении порога». Однако в требованиях к данным (строка 34) указано хранение «идентификатор карты, месяц, идентификатор операции, сумму покупки в тиынах, признак отправки и порог в тенге», а в описании интеграции и данных отсутствует маппинг маскированного номера карты (маскирование до 4 последних цифр) или вычисление текущей суммы расходов/порога для текста push.</p>
+              <p><strong>Бизнес- и тех. риск:</strong> Сервис push не сможет сформировать корректное текстовое сообщение клиенту из-за отсутствия необходимых полей в объекте передачи или сервисы отправят некорректно сформированный push-payload.</p>
+              <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> Какова точная структура payload события отправки push-уведомления, и передаются ли в push-сервис маскированный PAN (4 цифры), текущие накопленные расходы или значение установленного порога?</div>
+              <p><strong>Рекомендация:</strong> Унифицировать модель данных и контракт интеграции между Сервисом расходов и Сервисом push, зафиксировав точную схему передаваемого сообщения.</p>
+            </div>
+            
+            <div class="card defect-card" data-sev="MAJOR">
+              <div class="card-header">
+                <span class="sev-pill major">Существенный</span>
+                <span class="def-id">DEF-S05</span>
+                <span class="crit-tag">Готовность, версионность и заполненность спецификации (IEEE 830 п. 4.3)</span>
+                <span class="origin-tag">STRUCTURAL</span>
+              </div>
+              <h3>Незаполненный чек-лист ревью требований (оставлены шаблонные «Да / Нет»)</h3>
+              <p class="meta-rel">Затронуто: <code>Весь документ</code></p>
+              <div class="ev-grid"><div class='ev-box'><div class='ev-loc'>Стр. 2, строки 51–53 (Часть A. Новый функционал → Ревью требований)</div><pre class='ev-quote'>| Техническое требование зафиксировано и покрывает бизнес-требование | Да / Нет | Да / Нет |  |
+| Функциональная спецификация имеет структурированное описание (по стандарту, шаблону) | Да / Нет | Да / Нет |  |
+| Sequence-диаграммы, предусмотрены взаимодействия систем, компонентов и решений | Да / Нет / Не требуется | Да / Нет / Не требуется |  |</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 3, строки 63–65 (Часть A. Новый функционал → Ревью требований)</div><pre class='ev-quote'>| Все изменения, влияющие на иные продукты/системы в требовании, согласованы с ответственными лицами | Да / Нет / Не требуется | Да / Нет / Не требуется |  |
+| Структура требований не несёт изменений и рисков информационной безопасности | Да / Нет | Да / Нет | По информационной безопасности — чек-лист |
+| В требовании присутствует схема полного бизнес-процесса и часть реализуемой доработки | Да / Нет | Да / Нет |  |</pre></div></div>
+              <p><strong>Проблема:</strong> В таблице раздела «Часть A. Новый функционал → Ревью требований» (9 строк) не проставлены отметки прохождения архитектурного, тестового и ИБ-ревью — сохранены шаблонные значения «Да / Нет».</p>
+              <p><strong>Бизнес- и тех. риск:</strong> Отсутствует подтверждение согласования со смежными командами, информационной безопасностью, архитектурой и схемы отката (feature toggle / rollback) до старта разработки.</p>
+              <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> Проводилось ли согласование с ИБ и архитекторами и какая схема отката/скрытия фичи предусмотрена в проде?</div>
+              <p><strong>Рекомендация:</strong> Заполнить актуальные статусы ревью по каждому пункту чек-листа и зафиксировать версию/дату документа.</p>
+            </div>
+            
+            <div class="card defect-card" data-sev="MAJOR">
+              <div class="card-header">
+                <span class="sev-pill major">Существенный</span>
+                <span class="def-id">DEF-S06</span>
+                <span class="crit-tag">Целостность контрактов (UI ↔ Логика ↔ БД ↔ REST API)</span>
+                <span class="origin-tag">STRUCTURAL</span>
+              </div>
+              <h3>Несогласованность типов данных одних и тех же атрибутов между запросом и ответом REST API</h3>
+              <p class="meta-rel">Затронуто: <code>REQ-18, REQ-20</code></p>
+              <div class="ev-grid"><div class='ev-box'><div class='ev-loc'>Стр. 4, строка 110 (Часть B. REST API → Параметры запроса → Query-параметры)</div><pre class='ev-quote'>| amount | integer | 32 bit | Да | 1 000–1 000 000 | Порог в тенге | limit_kzt |</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 4, строка 121 (Часть B. REST API → Ответ)</div><pre class='ev-quote'>| amount | string | При успехе | Порог в тенге | limit_kzt |</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 4, строка 111 (Часть B. REST API → Параметры запроса → Query-параметры)</div><pre class='ev-quote'>| enabled | integer | 1 знак | Да | 0 или 1 | Признак включения | enabled |</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 4, строка 122 (Часть B. REST API → Ответ)</div><pre class='ev-quote'>| enabled | string | «0» или «1» | Признак включения | enabled |</pre></div></div>
+              <p><strong>Проблема:</strong> Атрибуты, маппящиеся в одни и те же поля БД, меняют тип данных между входом и выходом метода: `amount` (`limit_kzt`: запрос `integer` vs ответ `string`), `enabled` (`enabled`: запрос `integer` vs ответ `string`).</p>
+              <p><strong>Бизнес- и тех. риск:</strong> Клиенту требуется явное преобразование между входным и выходным представлениями.</p>
+              <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> Преднамеренно ли различаются представления перечисленных полей?</div>
+              <p><strong>Рекомендация:</strong> Если различие предусмотрено, зафиксировать правило преобразования и пример. Иначе согласовать типы в контракте.</p>
+            </div>
+            
+            <div class="card defect-card" data-sev="MAJOR">
+              <div class="card-header">
+                <span class="sev-pill major">Существенный</span>
+                <span class="def-id">DEF-S07</span>
+                <span class="crit-tag">Непротиворечивость набора (ISO 29148 п. 5.2.6 / IEEE 830 п. 4.3)</span>
+                <span class="origin-tag">STRUCTURAL</span>
+              </div>
+              <h3>Противоречие в описании HTTP 403 Forbidden и 404 Not Found</h3>
+              <p class="meta-rel">Затронуто: <code>REQ-21</code></p>
+              <div class="ev-grid"><div class='ev-box'><div class='ev-loc'>Стр. 4, строка 139 (Часть B. REST API → Статусы → 403. Unsuccessful — Forbidden)</div><pre class='ev-quote'>### 403. Unsuccessful — Forbidden</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 4, строка 140 (Часть B. REST API → Статусы → 403. Unsuccessful — Forbidden)</div><pre class='ev-quote'>Для чужой карты возвращается 404, как и для отсутствующей карты.</pre></div></div>
+              <p><strong>Проблема:</strong> В перечне статусов заявлен код `403` (доступ запрещён), но внутри секции `403. Unsuccessful — Forbidden` указано, что для чужой карты возвращается `404`, и приведён только пример `404`. Условия возврата и формат `403` не определены.</p>
+              <p><strong>Бизнес- и тех. риск:</strong> Неоднозначность в тестах безопасности (IDOR): тестировщик не знает, в каком сценарии метод реально должен вернуть 403, а в каком 404.</p>
+              <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> Используется ли статус 403 в этом методе вообще (например, для заблокированной сессии/роли), или при проверке принадлежности карты всегда отдаётся только 404?</div>
+              <p><strong>Рекомендация:</strong> Вынести `404 Not Found` в отдельную секцию статусов (для отсутствующей или чужой карты в целях защиты от перебора ID) и либо описать точный триггер и JSON-ответ для `403`, либо исключить `403` из спецификации метода.</p>
+            </div>
+            
+            <div class="card defect-card" data-sev="MINOR">
+              <div class="card-header">
+                <span class="sev-pill minor">Незначительный</span>
+                <span class="def-id">DEF-S08</span>
+                <span class="crit-tag">Готовность, версионность и заполненность спецификации (IEEE 830 п. 4.3)</span>
+                <span class="origin-tag">STRUCTURAL</span>
+              </div>
+              <h3>Незаполненная заглушка в разделе «Часть A. Новый функционал → Требования к тестированию → Тестирование требований»</h3>
+              <p class="meta-rel">Затронуто: <code>Весь документ</code></p>
+              <div class="ev-grid"><div class='ev-box'><div class='ev-loc'>Стр. 2, строка 39 (Часть A. Новый функционал → Требования к тестированию → Тестирование требований)</div><pre class='ev-quote'>заполняются тестировщиками</pre></div></div>
+              <p><strong>Проблема:</strong> Раздел оставлен незавершённым: присутствует шаблонная пометка «заполняются тестировщиками».</p>
+              <p><strong>Бизнес- и тех. риск:</strong> Не определены входные условия, тестовые данные и стратегия проверки требований.</p>
+              <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> Какие тестовые сценарии, стенды или моки карточного процессинга обязательны для приёмки?</div>
+              <p><strong>Рекомендация:</strong> Заполнить раздел конкретными требованиями к тестированию вместо шаблонной пометки.</p>
+            </div>
+            
+            <div class="card defect-card" data-sev="MINOR">
+              <div class="card-header">
+                <span class="sev-pill minor">Незначительный</span>
+                <span class="def-id">DEF-S09</span>
+                <span class="crit-tag">Готовность, версионность и заполненность спецификации (IEEE 830 п. 4.3)</span>
+                <span class="origin-tag">STRUCTURAL</span>
+              </div>
+              <h3>Незаполненная заглушка в разделе «Часть A. Новый функционал → Ревью требований»</h3>
+              <p class="meta-rel">Затронуто: <code>Весь документ</code></p>
+              <div class="ev-grid"><div class='ev-box'><div class='ev-loc'>Стр. 2, строка 48 (Часть A. Новый функционал → Ревью требований)</div><pre class='ev-quote'>Документ (версия/дата) в источнике не заполнен. Пункты чек-листа приведены как в шаблоне, отметки не проставлены.</pre></div></div>
+              <p><strong>Проблема:</strong> Раздел оставлен незавершённым: присутствует шаблонная пометка «Документ (версия/дата) в источнике не заполнен. Пункты чек-листа приведены как в шаблоне, отметки не проставлены.».</p>
+              <p><strong>Бизнес- и тех. риск:</strong> Отсутствуют метаданные версии и даты ревизии спецификации, что нарушает прослеживаемость изменений.</p>
+              <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> Какова актуальная версия и дата утверждения данного документа требований?</div>
+              <p><strong>Рекомендация:</strong> Указать актуальный номер версии, дату фиксации и автора ревизии документа.</p>
+            </div>
+            
+            <div class="card defect-card" data-sev="MINOR">
+              <div class="card-header">
+                <span class="sev-pill minor">Незначительный</span>
+                <span class="def-id">DEF-S10</span>
+                <span class="crit-tag">Полнота набора требований и edge-кейсов (ISO 29148 п. 5.2.6)</span>
+                <span class="origin-tag">STRUCTURAL</span>
+              </div>
+              <h3>Не указаны промышленный URL (Prod) и ссылка на спецификацию Swagger/OpenAPI</h3>
+              <p class="meta-rel">Затронуто: <code>REQ-15</code></p>
+              <div class="ev-grid"><div class='ev-box'><div class='ev-loc'>Стр. 3, строка 83 (Часть B. REST API → Общие параметры)</div><pre class='ev-quote'>| Request URL | Dev: /alerts/saveLimit . Prod: — |</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 3, строка 85 (Часть B. REST API → Общие параметры)</div><pre class='ev-quote'>| Swagger | — |</pre></div></div>
+              <p><strong>Проблема:</strong> В параметрах REST API отсутствует маршрут для промышленного контура (`Prod: —`) и ссылка на контракт Swagger (`—`).</p>
+              <p><strong>Бизнес- и тех. риск:</strong> Интеграция мобильного приложения для промышленного релиза требует дополнительного согласования маршрутизации API Gateway и версионирования (`/v1/...`).</p>
+              <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> Какой базовый путь и префикс версии API используется на промышленном контуре (Prod)?</div>
+              <p><strong>Рекомендация:</strong> Зафиксировать единый относительный маршрут с версией API (например, `/api/v1/cards/{cardId}/spending-alert`) и приложить OpenAPI-схему.</p>
+            </div>
+            
+            <div class="card defect-card" data-sev="MINOR">
+              <div class="card-header">
+                <span class="sev-pill minor">Незначительный</span>
+                <span class="def-id">DEF-S11</span>
+                <span class="crit-tag">Непротиворечивость набора (ISO 29148 п. 5.2.6 / IEEE 830 п. 4.3)</span>
+                <span class="origin-tag">STRUCTURAL</span>
+              </div>
+              <h3>Противоречие в секции Request body: указан Content-Type application/json при отсутствии тела</h3>
+              <p class="meta-rel">Затронуто: <code>Весь документ</code></p>
+              <div class="ev-grid"><div class='ev-box'><div class='ev-loc'>Стр. 4, строка 114 (Часть B. REST API → Параметры запроса → Request body)</div><pre class='ev-quote'>• Content-Type: application/json .</pre></div><div class='ev-box'><div class='ev-loc'>Стр. 4, строка 115 (Часть B. REST API → Параметры запроса → Request body)</div><pre class='ev-quote'>• Тело не используется.</pre></div></div>
+              <p><strong>Проблема:</strong> В описании тела запроса одновременно требуется заголовок `Content-Type: application/json` и утверждается, что тело запроса не используется.</p>
+              <p><strong>Бизнес- и тех. риск:</strong> Некоторые HTTP-клиенты, WAF и API-шлюзы отклоняют GET-запросы без тела с заголовком `Content-Type: application/json` как некорректный JSON.</p>
+              <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> Должны ли параметры передаваться в JSON-теле POST/PUT запроса или заголовок Content-Type в запросе лишний?</div>
+              <p><strong>Рекомендация:</strong> При переходе на PUT/POST перенести параметры в JSON-тело; для GET-запросов убрать требование заголовка `Content-Type: application/json`.</p>
+            </div>
+            
+
+    <h2>Индивидуальная проверка требований (11)</h2>
+    
+            <div class="card defect-card" data-sev="CRITICAL">
+              <div class="card-header">
+                <span class="sev-pill critical">Критичный (Блокер)</span>
+                <span class="def-id">DEF-A01 → REQ-05 (Ф-2)</span>
+                <span class="crit-tag">Однозначность (ISO 29148 п. 5.2.5)</span>
+                <span class="origin-tag">LLM</span>
+              </div>
+              <div class='ev-box'><div class='ev-loc'>Стр. 1, строка 26 (Часть A. Новый функционал → Требования к изменениям → Функциональные требования)</div><pre class='ev-quote'>• Ф-2. Месяц определяется по дате совершения покупки в Алматы. В расходы входят проведённые покупки. Возврат уменьшает расходы месяца исходной покупки. Переводы и снятие наличных исключаются.</pre></div>
+              <p><strong>Суть дефекта:</strong> Формулировка «по дате совершения покупки» неоднозначна: дата совершения (авторизации) может отличаться от даты клиринга/проведения (финансового списания), при этом далее упомянуты «проведённые покупки».</p>
+              <p><strong>Риск:</strong> Риск расхождения сумм накопленных расходов между процессингом и сервисом уведомлений, рассинхронизация при смене месяца.</p>
+              <p><strong>Что исправить:</strong> Четко зафиксировать, какой именно статус и штамп времени транзакции (дата авторизации или дата клиринга) используется для финансового учета месяца.</p>
+              <div class='fix-box'><strong>Предлагаемая правка:</strong> Уточнить у бизнес-аналитика: учитывается дата авторизации покупки по времени Алматы или дата финансового проведения (клиринга)?</div>
+            </div>
+            
+            <div class="card defect-card" data-sev="CRITICAL">
+              <div class="card-header">
+                <span class="sev-pill critical">Критичный (Блокер)</span>
+                <span class="def-id">DEF-A02 → REQ-09</span>
+                <span class="crit-tag">Проверяемость / измеримость (ISO 29148 п. 5.2.5)</span>
+                <span class="origin-tag">HYBRID</span>
+              </div>
+              <div class='ev-box'><div class='ev-loc'>Стр. 1, строка 32 (Часть A. Новый функционал → Нефункциональные требования)</div><pre class='ev-quote'>Сервис передаёт push на отправку в течение минуты после получения события.</pre></div>
+              <p><strong>Суть дефекта:</strong> Нефункциональное требование ко времени отклика задано без статистического перцентиля (p95/p99/max), целевой нагрузки (RPS/TPS), момента старта таймера и политики ретраев при сбое.</p>
+              <p><strong>Риск:</strong> Нагрузочное тестирование и приёмка SLA невозможны однозначно: единичный сетевой выброс либо сбой смежного сервиса трактуется двояко.</p>
+              <p><strong>Что исправить:</strong> Указать метрику (например, p95 ≤ 60 с при пиковой нагрузке N событий/сек), точки измерения тайминга и поведение при недоступности downstream-сервиса (очередь ретраев / DLQ).</p>
+              
+            </div>
+            
+            <div class="card defect-card" data-sev="CRITICAL">
+              <div class="card-header">
+                <span class="sev-pill critical">Критичный (Блокер)</span>
+                <span class="def-id">DEF-A03 → REQ-11</span>
+                <span class="crit-tag">Полнота формулировки (ISO 29148 п. 5.2.5)</span>
+                <span class="origin-tag">LLM</span>
+              </div>
+              <div class='ev-box'><div class='ev-loc'>Стр. 2, строка 36 (Часть A. Новый функционал → Требования к интеграции)</div><pre class='ev-quote'>Приложение читает и сохраняет настройки через дочерний документ «Уведомление о расходах по карте — REST API». Повторная доставка одного события процессинга сохраняет исходный итог.</pre></div>
+              <p><strong>Суть дефекта:</strong> Не указан механизм обеспечения идемпотентности (уникальный ключ или transaction_id) при повторной доставке события процессинга.</p>
+              <p><strong>Риск:</strong> Риск повторного суммирования одной и той же покупки при сбоях сети или повторных доставках.</p>
+              <p><strong>Что исправить:</strong> Указать уникальный ключ идемпотентности для обработки событий процессинга.</p>
+              <div class='fix-box'><strong>Предлагаемая правка:</strong> Добавить: «Идемпотентность обеспечивается по уникальному идентификатору операции (operation_id/transaction_id)».</div>
+            </div>
+            
+            <div class="card defect-card" data-sev="MAJOR">
+              <div class="card-header">
+                <span class="sev-pill major">Существенный</span>
+                <span class="def-id">DEF-A04 → REQ-01</span>
+                <span class="crit-tag">Проверяемость / измеримость (ISO 29148 п. 5.2.5)</span>
+                <span class="origin-tag">LLM</span>
+              </div>
+              <div class='ev-box'><div class='ev-loc'>Стр. 1, строка 16 (Часть A. Новый функционал → Цели)</div><pre class='ev-quote'>Дать клиенту возможность узнать о достижении личного бюджета в момент покупки.</pre></div>
+              <p><strong>Суть дефекта:</strong> Формулировка «в момент покупки» не содержит конкретного временного регламента (SLA/SLA-таймаута) для проверки выполнения цели.</p>
+              <p><strong>Риск:</strong> Невозможно объективно протестировать и подтвердить достижение бизнес-цели при приемке.</p>
+              <p><strong>Что исправить:</strong> Указать допустимый временной интервал от момента авторизации покупки до информирования клиента.</p>
+              <div class='fix-box'><strong>Предлагаемая правка:</strong> Уточнить у владельца продукта: каков целевой максимальный временной зазор между проведением транзакции и информированием?</div>
+            </div>
+            
+            <div class="card defect-card" data-sev="MAJOR">
+              <div class="card-header">
+                <span class="sev-pill major">Существенный</span>
+                <span class="def-id">DEF-A05 → REQ-05 (Ф-2)</span>
+                <span class="crit-tag">Единичность / атомарность (ISO 29148 п. 5.2.5)</span>
+                <span class="origin-tag">HYBRID</span>
+              </div>
+              <div class='ev-box'><div class='ev-loc'>Стр. 1, строка 26 (Часть A. Новый функционал → Требования к изменениям → Функциональные требования)</div><pre class='ev-quote'>• Ф-2. Месяц определяется по дате совершения покупки в Алматы. В расходы входят проведённые покупки. Возврат уменьшает расходы месяца исходной покупки. Переводы и снятие наличных исключаются.</pre></div>
+              <p><strong>Суть дефекта:</strong> Требование содержит 4 независимых бизнес-правила: часовой пояс месяца, состав операций (покупки), порядок обработки возвратов, исключения (переводы и снятие).</p>
+              <p><strong>Риск:</strong> Затрудняет покрытие тестами всех условий и проверку их реализации.</p>
+              <p><strong>Что исправить:</strong> Разбить пункт Ф-2 на четыре отдельные поднормы.</p>
+              <div class='fix-box'><strong>Предлагаемая правка:</strong> Выделить правила в отдельные требования Ф-2.1 ... Ф-2.4.</div>
+            </div>
+            
+            <div class="card defect-card" data-sev="MAJOR">
+              <div class="card-header">
+                <span class="sev-pill major">Существенный</span>
+                <span class="def-id">DEF-A06 → REQ-10</span>
+                <span class="crit-tag">Полнота формулировки (ISO 29148 п. 5.2.5)</span>
+                <span class="origin-tag">LLM</span>
+              </div>
+              <div class='ev-box'><div class='ev-loc'>Стр. 2, строка 34 (Часть A. Новый функционал → Требования к данным)</div><pre class='ev-quote'>Хранить идентификатор карты, месяц, идентификатор операции, сумму покупки в тиынах, признак отправки и порог в тенге.</pre></div>
+              <p><strong>Суть дефекта:</strong> В перечне хранимых атрибутов порог указан в тенге, а сумма покупки в тиынах, но не зафиксированы типы данных и признак активности настройки (enabled).</p>
+              <p><strong>Риск:</strong> Неполнота спецификации модели данных приводит к искажению схемы БД разработчиками.</p>
+              <p><strong>Что исправить:</strong> Дополнить атрибутивный состав модели данных типами полей и отсутствующим полем состояния уведомлений.</p>
+              <div class='fix-box'><strong>Предлагаемая правка:</strong> Уточнить у аналитика: требуется ли хранить флаг активности push-уведомления (enabled) в структуре данных расходов?</div>
+            </div>
+            
+            <div class="card defect-card" data-sev="MAJOR">
+              <div class="card-header">
+                <span class="sev-pill major">Существенный</span>
+                <span class="def-id">DEF-A07 → REQ-16</span>
+                <span class="crit-tag">Полнота формулировки (ISO 29148 п. 5.2.5)</span>
+                <span class="origin-tag">LLM</span>
+              </div>
+              <div class='ev-box'><div class='ev-loc'>Стр. 3, строка 96 (Часть B. REST API → Логика работы метода)</div><pre class='ev-quote'>5. При отклонении суммы вернуть прежнее состояние и результат ERROR.</pre></div>
+              <p><strong>Суть дефекта:</strong> В шаге 5 указано «При отклонении суммы вернуть прежнее состояние и результат ERROR», но не определен HTTP-код ответа для данного бизнес-отклонения.</p>
+              <p><strong>Риск:</strong> Неоднозначность реализации статус-кода на бэкенде и обработки ответа на клиенте.</p>
+              <p><strong>Что исправить:</strong> Явно указать HTTP status code для ответа с результатом ERROR (например, HTTP 400).</p>
+              <div class='fix-box'><strong>Предлагаемая правка:</strong> Уточнить у API-проектировщика: возвращается ли HTTP 400 или HTTP 200 при получении бизнес-ошибки «результат ERROR»?</div>
+            </div>
+            
+            <div class="card defect-card" data-sev="MAJOR">
+              <div class="card-header">
+                <span class="sev-pill major">Существенный</span>
+                <span class="def-id">DEF-A08 → REQ-19</span>
+                <span class="crit-tag">Однозначность (ISO 29148 п. 5.2.5)</span>
+                <span class="origin-tag">LLM</span>
+              </div>
+              <div class='ev-box'><div class='ev-loc'>Стр. 4, строка 117 (Часть B. REST API → Ответ)</div><pre class='ev-quote'>Если результат 200 или 201 — успешный. Если результат 400, 401 и далее — неуспешный.</pre></div>
+              <p><strong>Суть дефекта:</strong> Формулировка допускает HTTP 201 для GET-запроса («Если результат 200 или 201 — успешный»), что противоречит спецификациям HTTP.</p>
+              <p><strong>Риск:</strong> Путаница при интеграционном тестировании и обработке кодов ответа мобильным приложением.</p>
+              <p><strong>Что исправить:</strong> Привести статусы ответа в строгое соответствие с выбранным HTTP-методом.</p>
+              <div class='fix-box'><strong>Предлагаемая правка:</strong> Исключить код 201 для GET-метода или скорректировать спецификацию метода на POST.</div>
+            </div>
+            
+            <div class="card defect-card" data-sev="MINOR">
+              <div class="card-header">
+                <span class="sev-pill minor">Незначительный</span>
+                <span class="def-id">DEF-A09 → REQ-02</span>
+                <span class="crit-tag">Единичность / атомарность (ISO 29148 п. 5.2.5)</span>
+                <span class="origin-tag">LLM</span>
+              </div>
+              <div class='ev-box'><div class='ev-loc'>Стр. 1, строка 20 (Часть A. Новый функционал → Дизайн процесса UI)</div><pre class='ev-quote'>Карты → Расходы → Уведомления. На экране видны переключатель, поле «Порог, ₸», сумма за месяц и кнопка «Сохранить». При ошибке ввода сообщение появляется под полем.</pre></div>
+              <p><strong>Суть дефекта:</strong> Требование объединяет навигацию, состав UI-элементов и логику отображения ошибки в одну формулировку.</p>
+              <p><strong>Риск:</strong> Усложняет отслеживание трассируемости и отдельное тестирование элементов UI.</p>
+              <p><strong>Что исправить:</strong> Разбить требования UI на отдельные атомарные пункты.</p>
+              <div class='fix-box'><strong>Предлагаемая правка:</strong> Разделить на: 1) Состав экрана и навигация; 2) Отображение ошибок ввода.</div>
+            </div>
+            
+            <div class="card defect-card" data-sev="MINOR">
+              <div class="card-header">
+                <span class="sev-pill minor">Незначительный</span>
+                <span class="def-id">DEF-A10 → REQ-04 (Ф-1)</span>
+                <span class="crit-tag">Единичность / атомарность (ISO 29148 п. 5.2.5)</span>
+                <span class="origin-tag">LLM</span>
+              </div>
+              <div class='ev-box'><div class='ev-loc'>Стр. 1, строка 25 (Часть A. Новый функционал → Требования к изменениям → Функциональные требования)</div><pre class='ev-quote'>• Ф-1. Держатель активной карты KZT задаёт целый порог от 1 000 до 1 000 000 ₸ включительно. По умолчанию уведомление выключено.</pre></div>
+              <p><strong>Суть дефекта:</strong> Требование объединяет правила валидации вводного порога и начальное состояние функции (значение по умолчанию).</p>
+              <p><strong>Риск:</strong> Разные аспекты (UI/API валидация и инициализация профиля) смешаны в одном пункте.</p>
+              <p><strong>Что исправить:</strong> Выделить установку дефолтного состояния в отдельное требование.</p>
+              <div class='fix-box'><strong>Предлагаемая правка:</strong> Разбить Ф-1 на два пункта: Ф-1.1 (диапазон значений порога) и Ф-1.2 (дефолтное состояние выключено).</div>
+            </div>
+            
+            <div class="card defect-card" data-sev="MINOR">
+              <div class="card-header">
+                <span class="sev-pill minor">Незначительный</span>
+                <span class="def-id">DEF-A11 → REQ-06 (Ф-3)</span>
+                <span class="crit-tag">Единичность / атомарность (ISO 29148 п. 5.2.5)</span>
+                <span class="origin-tag">LLM</span>
+              </div>
+              <div class='ev-box'><div class='ev-loc'>Стр. 1, строка 27 (Часть A. Новый функционал → Требования к изменениям → Функциональные требования)</div><pre class='ev-quote'>• Ф-3. Когда расходы переходят от суммы ниже порога к сумме, равной порогу или выше, клиент получает push. На карту приходится максимум один такой push за календарный месяц.</pre></div>
+              <p><strong>Суть дефекта:</strong> Условие возникновения триггера push-уведомления и лимит отправок на календарный месяц объединены в одном пункте.</p>
+              <p><strong>Риск:</strong> Смешение триггера события и системного ограничения отправок.</p>
+              <p><strong>Что исправить:</strong> Разделить правило перехода порога и ограничение «не более 1 push в месяц».</p>
+              <div class='fix-box'><strong>Предлагаемая правка:</strong> Разбить Ф-3 на пункт генерации события и пункт лимитирования сообщений.</div>
+            </div>
+            
+
+    <h2>Реестр выделенных требований (21)</h2>
+    <table>
+      <thead><tr><th>ID</th><th>ID в док.</th><th>Категория</th><th>Локация</th><th>Формулировка и верифицированная цитата</th></tr></thead>
+      <tbody><tr><td><code>REQ-01</code></td><td><span class='muted'>— (присвоен)</span></td><td>Бизнес-цель</td><td class='loc'>Стр. 1, строка 16 (Часть A. Новый функционал → Цели)</td><td><strong>Информирование клиента о достижении личного бюджета</strong><div class='quote'>«Дать клиенту возможность узнать о достижении личного бюджета в момент покупки.»</div></td></tr><tr><td><code>REQ-02</code></td><td><span class='muted'>— (присвоен)</span></td><td>UI / UX процесс</td><td class='loc'>Стр. 1, строка 20 (Часть A. Новый функционал → Дизайн процесса UI)</td><td><strong>Элементы экрана настройки уведомлений и обработка ошибок ввода</strong><div class='quote'>«Карты → Расходы → Уведомления. На экране видны переключатель, поле «Порог, ₸», сумма за месяц и кнопка «Сохранить». При ошибке ввода сообщение появляется под полем.»</div></td></tr><tr><td><code>REQ-03</code></td><td><span class='muted'>— (присвоен)</span></td><td>Процесс (BPMN / Sequence)</td><td class='loc'>Стр. 1, строка 23 (Часть A. Новый функционал → Требования к изменениям → BPMN схема процесса)</td><td><strong>BPMN процесс проверки порога и отправки push</strong><div class='quote'>«Проведение покупки → пересчёт расходов → проверка порога → при достижении отправка push → завершение.»</div></td></tr><tr><td><code>REQ-04</code></td><td>Ф-1</td><td>Функциональное требование</td><td class='loc'>Стр. 1, строка 25 (Часть A. Новый функционал → Требования к изменениям → Функциональные требования)</td><td><strong>Установка порога уведомлений и значение по умолчанию</strong><div class='quote'>«• Ф-1. Держатель активной карты KZT задаёт целый порог от 1 000 до 1 000 000 ₸ включительно. По умолчанию уведомление выключено.»</div></td></tr><tr><td><code>REQ-05</code></td><td>Ф-2</td><td>Функциональное требование</td><td class='loc'>Стр. 1, строка 26 (Часть A. Новый функционал → Требования к изменениям → Функциональные требования)</td><td><strong>Правила расчёта месячных расходов по карте</strong><div class='quote'>«• Ф-2. Месяц определяется по дате совершения покупки в Алматы. В расходы входят проведённые покупки. Возврат уменьшает расходы месяца исходной покупки. Переводы и снятие наличных исключаются.»</div></td></tr><tr><td><code>REQ-06</code></td><td>Ф-3</td><td>Функциональное требование</td><td class='loc'>Стр. 1, строка 27 (Часть A. Новый функционал → Требования к изменениям → Функциональные требования)</td><td><strong>Условия отправки push-уведомления и лимит отправок</strong><div class='quote'>«• Ф-3. Когда расходы переходят от суммы ниже порога к сумме, равной порогу или выше, клиент получает push. На карту приходится максимум один такой push за календарный месяц.»</div></td></tr><tr><td><code>REQ-07</code></td><td>Ф-4</td><td>Функциональное требование</td><td class='loc'>Стр. 1, строка 28 (Часть A. Новый функционал → Требования к изменениям → Функциональные требования)</td><td><strong>Поведение системы при изменении порога</strong><div class='quote'>«• Ф-4. При изменении порога накопленная сумма сохраняется. Если она ниже нового порога, следующее достижение вызывает push независимо от истории предыдущей настройки.»</div></td></tr><tr><td><code>REQ-08</code></td><td><span class='muted'>— (присвоен)</span></td><td>Процесс (BPMN / Sequence)</td><td class='loc'>Стр. 1, строка 30 (Часть A. Новый функционал → Sequence Diagram)</td><td><strong>Sequence Diagram взаимодействия сервисов</strong><div class='quote'>«Процессинг → сервис расходов: проведена покупка. Сервис расходов → настройки: получить порог карты. Сервис расходов → push: передать последние четыре цифры карты и сумму при достижении порога.»</div></td></tr><tr><td><code>REQ-09</code></td><td><span class='muted'>— (присвоен)</span></td><td>Нефункциональное требование</td><td class='loc'>Стр. 1, строка 32 (Часть A. Новый функционал → Нефункциональные требования)</td><td><strong>Время передачи push-уведомления на отправку</strong><div class='quote'>«Сервис передаёт push на отправку в течение минуты после получения события.»</div></td></tr><tr><td><code>REQ-10</code></td><td><span class='muted'>— (присвоен)</span></td><td>Требование к данным</td><td class='loc'>Стр. 2, строка 34 (Часть A. Новый функционал → Требования к данным)</td><td><strong>Состав хранящихся данных по расходам и настройкам</strong><div class='quote'>«Хранить идентификатор карты, месяц, идентификатор операции, сумму покупки в тиынах, признак отправки и порог в тенге.»</div></td></tr><tr><td><code>REQ-11</code></td><td><span class='muted'>— (присвоен)</span></td><td>Интеграция и идемпотентность</td><td class='loc'>Стр. 2, строка 36 (Часть A. Новый функционал → Требования к интеграции)</td><td><strong>Интеграционные требования к сохранению настроек и идемпотентности процессинга</strong><div class='quote'>«Приложение читает и сохраняет настройки через дочерний документ «Уведомление о расходах по карте — REST API». Повторная доставка одного события процессинга сохраняет исходный итог.»</div></td></tr><tr><td><code>REQ-12</code></td><td><span class='muted'>— (присвоен)</span></td><td>Тестирование / Критерий приёмки</td><td class='loc'>Стр. 2, строка 43 (Часть A. Новый функционал → Критерии приемки)</td><td><strong>Критерий приемки #1: достижение порога при покупке</strong><div class='quote'>«| Расходы 48 500 ₸, порог 50 000 ₸ | Провести покупку на 1 500 ₸ | Итог 50 000 ₸ и один push |»</div></td></tr><tr><td><code>REQ-13</code></td><td><span class='muted'>— (присвоен)</span></td><td>Тестирование / Критерий приёмки</td><td class='loc'>Стр. 2, строка 44 (Часть A. Новый функционал → Критерии приемки)</td><td><strong>Критерий приемки #2: учет часового пояса Алматы при смене месяца</strong><div class='quote'>«| Покупка 31 января в 23:58 на 4 000 ₸ | Провести 1 февраля в 00:03 по Алматы | Февральский счётчик вырос на 4 000 ₸ |»</div></td></tr><tr><td><code>REQ-14</code></td><td><span class='muted'>— (присвоен)</span></td><td>Тестирование / Критерий приёмки</td><td class='loc'>Стр. 2, строка 45 (Часть A. Новый функционал → Критерии приемки)</td><td><strong>Критерий приемки #3: исключение переводов из расчёта расходов</strong><div class='quote'>«| Расходы 19 900 ₸, порог 20 000 ₸ | Перевести 500 ₸ | Счётчик показывает 19 900 ₸ |»</div></td></tr><tr><td><code>REQ-15</code></td><td><span class='muted'>— (присвоен)</span></td><td>Контракт REST API</td><td class='loc'>Стр. 3, строки 79–84 (Часть B. REST API → Общие параметры)</td><td><strong>Общие параметры метода REST API</strong><div class='quote'>«| REST type | GET |
+| Authorization | Bearer, сессия владельца карты |
+| Controller | AlertsController |
+| URL type | Dev / Prod |
+| Request URL | Dev: /alerts/saveLimit . Prod: — |
+| CURL | curl -G &quot;$BASE/alerts/saveLimit&quot; -H &quot;Authorization: Bearer $TOKEN&quot; --data &#x27;cardId=demo-42&amp;amount=50000&amp;enabled=1&#x27; |»</div></td></tr><tr><td><code>REQ-16</code></td><td><span class='muted'>— (присвоен)</span></td><td>Контракт REST API</td><td class='loc'>Стр. 3, строки 92–96 (Часть B. REST API → Логика работы метода)</td><td><strong>Логика работы метода REST API</strong><div class='quote'>«1. Проверить пользовательскую сессию.
+2. Проверить принадлежность карты клиенту.
+3. Проверить сумму и переключатель.
+4. Заменить настройку и вернуть результат сохранения.
+5. При отклонении суммы вернуть прежнее состояние и результат ERROR.»</div></td></tr><tr><td><code>REQ-17</code></td><td><span class='muted'>— (присвоен)</span></td><td>Контракт REST API</td><td class='loc'>Стр. 3, строки 98–100 (Часть B. REST API → Особые правила)</td><td><strong>Особые правила обработки порога в REST API</strong><div class='quote'>«1. Целое число тенге, обе границы включены.
+2. Повторное сохранение заменяет действующую настройку.
+3. Изменение порога сохраняет накопленные расходы.»</div></td></tr><tr><td><code>REQ-18</code></td><td><span class='muted'>— (присвоен)</span></td><td>Контракт REST API</td><td class='loc'>Стр. 4, строки 107–111 (Часть B. REST API → Параметры запроса → Query-параметры)</td><td><strong>Query-параметры запроса REST API</strong><div class='quote'>«| Parameter | Format | Size | Mandatory | Logic | Description | DB field |
+| --- | --- | --- | --- | --- | --- | --- |
+| cardId | string | 1–64 | Да | Карта клиента | Идентификатор карты | card_id |
+| amount | integer | 32 bit | Да | 1 000–1 000 000 | Порог в тенге | limit_kzt |
+| enabled | integer | 1 знак | Да | 0 или 1 | Признак включения | enabled |»</div></td></tr><tr><td><code>REQ-19</code></td><td><span class='muted'>— (присвоен)</span></td><td>Контракт REST API</td><td class='loc'>Стр. 4, строка 117 (Часть B. REST API → Ответ)</td><td><strong>Определение успешного и неуспешного результата ответа REST API</strong><div class='quote'>«Если результат 200 или 201 — успешный. Если результат 400, 401 и далее — неуспешный.»</div></td></tr><tr><td><code>REQ-20</code></td><td><span class='muted'>— (присвоен)</span></td><td>Контракт REST API</td><td class='loc'>Стр. 4, строки 118–123 (Часть B. REST API → Ответ)</td><td><strong>Структура параметров ответа REST API</strong><div class='quote'>«| Parameter | Format | Logic | Description | DB field |
+| --- | --- | --- | --- | --- |
+| result | string | OK / ERROR | Исход сохранения | — |
+| amount | string | При успехе | Порог в тенге | limit_kzt |
+| enabled | string | «0» или «1» | Признак включения | enabled |
+| message | string | При ошибке | Описание ошибки | — |»</div></td></tr><tr><td><code>REQ-21</code></td><td><span class='muted'>— (присвоен)</span></td><td>Контракт REST API</td><td class='loc'>Стр. 4, строки 126–144 (Часть B. REST API → Статусы)</td><td><strong>Коды статусов и примеры ответов REST API</strong><div class='quote'>«200. Ответ в случае успешного выполнения метода.
+400. Ответ в случае, если параметры запроса заполнены неверно.
+### 200. Successful — Created
+{&quot;result&quot;:&quot;OK&quot;,&quot;amount&quot;:&quot;50000&quot;,&quot;enabled&quot;:&quot;1&quot;}
+или
+{&quot;result&quot;:&quot;ERROR&quot;,&quot;message&quot;:&quot;Проверьте сумму&quot;}
+401. Ответ в случае, если запрос выполнен без необходимой авторизации.
+403. Ответ в случае, если на указанный ресурс доступ запрещен.
+500. Ответ в случае, если произошла внутренняя ошибка сервера.
+### 400. Unsuccessful — Bad request
+{&quot;message&quot;:&quot;Некорректный запрос&quot;}
+### 401. Unsuccessful — Unauthorized
+{&quot;message&quot;:&quot;Требуется вход&quot;}
+### 403. Unsuccessful — Forbidden
+Для чужой карты возвращается 404, как и для отсутствующей карты.
+404
+{&quot;message&quot;:&quot;Карта не найдена&quot;}
+### 500. Unsuccessful — Internal server error
+{&quot;message&quot;:&quot;Ошибка сервиса&quot;}»</div></td></tr></tbody>
+    </table>
+  </div>
+  <script>
+    function filterCards(sev, btn) {
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.defect-card').forEach(c => {
+        c.style.display = (sev === 'ALL' || c.dataset.sev === sev) ? 'block' : 'none';
+      });
+    }
+  </script>
+</body>
+</html>

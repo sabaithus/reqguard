@@ -177,11 +177,48 @@ class TokenUsage(BaseModel):
     counters: dict[str, int]
 
 
+class CriticNote(BaseModel):
+    problem: str
+    action: Literal["reject", "question", "duplicate"]
+    reason: str
+    evidence: SourceSpan
+
+
+class OwnerAnswer(BaseModel):
+    question: str
+    evidence: list[SourceSpan] = Field(min_length=1)
+    status: Literal["selected", "pending", "deferred"]
+    selected_outcome: str | None = None
+
+    def matches(self, issue: SetDefect) -> bool:
+        def locations(spans):
+            return {(s.line_start, s.line_end, s.quote) for s in spans}
+        return bool(issue.decision and self.question == issue.question_for_analyst
+                    and self.selected_outcome in issue.decision.alternatives
+                    and locations(self.evidence) == locations(issue.evidence))
+
+
+class OwnerProtocol(BaseModel):
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    exported_at: str = Field(min_length=1, max_length=64)
+    decisions: list[OwnerAnswer]
+
+    def selected(self) -> list[OwnerAnswer]:
+        return [a for a in self.decisions if a.status == "selected"]
+
+
+class AcceptedDecision(BaseModel):
+    finding: SetDefect
+    outcome: str
+    exported_at: str
+
+
 class RunPassport(BaseModel):
     """Паспорт прогона агента (Раздел 6 ТЗ хакатона)."""
 
     document_title: str
     source_file: str
+    critic_status: Literal["off", "completed", "failed"] = "off"
     source_format: str
     source_sha256: str
     total_lines: int
@@ -242,6 +279,14 @@ class AuditSummary(BaseModel):
     def score_label(self) -> str:
         return "не оценено" if self.readiness_score is None else f"{self.readiness_score}/100"
 
+    @property
+    def score_explanation(self) -> str:
+        if self.readiness_score is None:
+            return "Данных для численной оценки недостаточно."
+        penalty = 18*self.critical_count + 7*self.major_count + 2*self.minor_count
+        return (f"Эвристика. Штраф = 18 × {self.critical_count} + 7 × {self.major_count} + 2 × {self.minor_count} = {penalty}. "
+                f"Индекс = max(5, round(6000 / (60 + {penalty}))).")
+
 
 class AuditReport(BaseModel):
     """Полный верифицированный результат работы агента."""
@@ -251,3 +296,25 @@ class AuditReport(BaseModel):
     atomic_defects: list[AtomicDefect]
     set_defects: list[SetDefect]
     summary: AuditSummary
+    accepted_decisions: list[AcceptedDecision] = Field(default_factory=list)
+    critic_notes: list[CriticNote] = Field(default_factory=list)
+
+    @property
+    def exit_code(self) -> int:
+        if self.passport.analysis_status != "complete" or self.passport.unreadable_pages or self.passport.critic_status == "failed":
+            return 3
+        decisions = (self.summary.can_start_development, self.summary.can_start_testing)
+        if None in decisions:
+            return 3
+        return 0 if all(decisions) else 1
+
+    def owner_questions(self) -> list[tuple[str, list]]:
+        questions = {}
+        issues = [*self.set_defects, *self.atomic_defects]
+        for issue in sorted(issues, key=lambda d: ("CRITICAL", "MAJOR", "MINOR").index(d.severity)):
+            question = issue.question_for_analyst if isinstance(issue, SetDefect) else issue.suggested_fix
+            if not question or (isinstance(issue, AtomicDefect) and "?" not in question):
+                continue
+            key = " ".join(question.casefold().strip(" ?.!").split())
+            questions.setdefault(key, (question.strip(), []))[1].append(issue)
+        return list(questions.values())

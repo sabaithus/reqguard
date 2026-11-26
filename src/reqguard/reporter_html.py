@@ -65,7 +65,7 @@ def render_html_report(report: AuditReport) -> str:
         rel = ", ".join(sd.related_req_ids) if sd.related_req_ids else "Весь документ"
         set_cards_html.append(
             f"""
-            <div class="card defect-card" data-sev="{sd.severity}">
+            <div class="card defect-card" id="{html.escape(sd.defect_id)}" data-sev="{sd.severity}">
               <div class="card-header">
                 <span class="sev-pill {sev_cls}">{sev_label}</span>
                 <span class="def-id">{html.escape(sd.defect_id)}</span>
@@ -102,7 +102,7 @@ def render_html_report(report: AuditReport) -> str:
         )
         atomic_cards_html.append(
             f"""
-            <div class="card defect-card" data-sev="{ad.severity}">
+            <div class="card defect-card" id="{html.escape(ad.defect_id)}" data-sev="{ad.severity}">
               <div class="card-header">
                 <span class="sev-pill {sev_cls}">{sev_label}</span>
                 <span class="def-id">{html.escape(ad.defect_id)} → {html.escape(tag)}</span>
@@ -119,8 +119,26 @@ def render_html_report(report: AuditReport) -> str:
         )
 
     fixes_li = "".join(f"<li>{html.escape(f)}</li>" for f in s.priority_fixes)
+    questions = []
+    for question, issues in report.owner_questions():
+        links = ", ".join(f'<a href="#{html.escape(d.defect_id)}">{html.escape(d.defect_id)}</a>' for d in issues)
+        questions.append(f"<li>{html.escape(question)} · {links}</li>")
     export_button = '<button class="filter-btn" onclick="exportDecisions()">Скачать протокол решений (JSON)</button>' if any(d.decision for d in report.set_defects) else ""
 
+    history = []
+    history_cards = []
+    for accepted in report.accepted_decisions:
+        finding = accepted.finding
+        history.append({"question": finding.question_for_analyst, "evidence": [sp.model_dump() for sp in finding.evidence],
+                        "status": "selected", "selected_outcome": accepted.outcome})
+        history_cards.append(f"<li>{html.escape(finding.question_for_analyst)} — <strong>{html.escape(accepted.outcome)}</strong>"
+                             f" · {html.escape(accepted.exported_at)} · QA: {html.escape(finding.decision.acceptance_check)}</li>")
+    history_html = "<h2>Принятые решения владельца</h2><ol>" + "".join(history_cards) + "</ol>" if history else ""
+    critic_html = ""
+    if p.critic_status != "off":
+        notes = "".join(f"<li>{escape_note}</li>" for escape_note in (
+            html.escape(f"{n.action} · {n.problem} — {n.reason}. {n.evidence.format_locator()}: {n.evidence.quote}") for n in report.critic_notes))
+        critic_html = f"<h2>Контрольный проход модели</h2><p>{p.critic_status}</p><ul>{notes}</ul>"
     return f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -194,9 +212,14 @@ def render_html_report(report: AuditReport) -> str:
 
     <div class="card">
       <h3 style="margin-top:0">Что исправить в первую очередь до старта разработки</h3>
+      <p>{html.escape(s.score_explanation)}</p>
       <ol>{fixes_li}</ol>
     </div>
 
+    <div id="accepted" data-history="{html.escape(json.dumps(history, ensure_ascii=False), quote=True)}">{history_html}</div>
+    {critic_html}
+    <h2>Вопросы владельцу продукта</h2>
+    <ol>{''.join(questions) or '<li>Открытых вопросов в результате этой проверки нет.</li>'}</ol>
     <div class="filters">
       <button class="filter-btn active" onclick="filterCards('ALL', this)">Все нарушения ({s.total_defects})</button>
       <button class="filter-btn" onclick="filterCards('CRITICAL', this)">Критичные блокеры ({s.critical_count})</button>
@@ -218,6 +241,13 @@ def render_html_report(report: AuditReport) -> str:
     </table>
   </div>
   <script>
+    const audit = document.getElementById('audit').dataset;
+    for (const field of document.querySelectorAll('.decision')) {{
+      const select = field.querySelector('select');
+      const key = ['reqguard', audit.source, audit.version, audit.run, JSON.parse(field.dataset.case).defect_id].join(':');
+      try {{ select.value = localStorage.getItem(key) || ''; }} catch (_) {{}}
+      select.addEventListener('change', () => {{ try {{ localStorage.setItem(key, select.value); }} catch (_) {{}} }});
+    }}
     function exportDecisions() {{
       const run = document.getElementById('audit').dataset;
       const decisions = Array.from(document.querySelectorAll('.decision'), field => {{
@@ -228,7 +258,7 @@ def render_html_report(report: AuditReport) -> str:
         return entry;
       }});
       const record = {{source_sha256: run.source, agent_version: run.version, run_timestamp: run.run,
-        exported_at: new Date().toISOString(), decisions}};
+        exported_at: new Date().toISOString(), decisions: [...JSON.parse(document.getElementById('accepted').dataset.history), ...decisions]}};
       const url = URL.createObjectURL(new Blob([JSON.stringify(record, null, 2)], {{type: 'application/json'}}));
       const link = document.createElement('a');
       link.href = url;

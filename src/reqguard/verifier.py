@@ -6,6 +6,8 @@ import re
 
 from reqguard.models import (
     AtomicDefect,
+    AcceptedDecision,
+    OwnerProtocol,
     AuditReport,
     AuditSummary,
     CRITERION_LABELS_RU,
@@ -319,12 +321,24 @@ def build_verified_audit_report(
     candidate_atomic: list[AtomicDefect],
     candidate_set: list[SetDefect],
     initial_filtered_count: int = 0,
+    answers: OwnerProtocol | None = None,
 ) -> AuditReport:
     """Прогоняет все замечания через верификатор цитат, удаляет дубликаты и формирует сводку."""
     filtered_hallucinations = initial_filtered_count
     verified_quotes = sum(1 for r in requirements if r.source.verified)
 
     req_sources = {r.report_id: r.source for r in requirements}
+    has_operation_id = any(re.search(r"\b(?:идентификатор операции|operation[_-]?id)\b", dl.raw_text, re.I) for dl in doc.lines)
+
+    def calibrate(issue: AtomicDefect | SetDefect) -> None:
+        if issue.origin != "LLM" or issue.severity != "CRITICAL":
+            return
+        claim = issue.problem.casefold()
+        if issue.criterion == "VERIFIABLE" and re.search(r"перцентил|p9[059]|профил.{0,4} нагрузк|\brps\b", claim):
+            issue.severity = "MAJOR"
+        if has_operation_id and re.search(r"(?:не (?:задан|определ|указан)|нет|отсутств)[^.!?]{0,60}(?:ключ|идентификатор)[^.!?]{0,30}идемпотент", claim):
+            issue.severity = "MAJOR"
+
     verified_atomic: list[AtomicDefect] = []
     for ad in candidate_atomic:
         valid_spans: list[SourceSpan] = []
@@ -338,6 +352,7 @@ def build_verified_audit_report(
             filtered_hallucinations += 1
             continue
         ad.evidence = valid_spans
+        calibrate(ad)
         verified_atomic.append(ad)
 
     verified_set: list[SetDefect] = []
@@ -361,6 +376,7 @@ def build_verified_audit_report(
             filtered_hallucinations += 1
             continue
         sd.evidence = valid_spans
+        calibrate(sd)
         verified_set.append(sd)
 
     # Дедупликация: сначала Set, затем кросс-дедупликация Atomic ↔ Set и сортировка по критичности
@@ -377,6 +393,15 @@ def build_verified_audit_report(
     dedup_set.sort(key=lambda d: (SEVERITY_RANK[d.severity], d.evidence[0].line_start))
     for i, sd in enumerate(dedup_set, start=1):
         sd.defect_id = f"DEF-S{i:02d}"
+
+    accepted = []
+    for answer in answers.selected() if answers else []:
+        matches = [issue for issue in dedup_set if answer.matches(issue)]
+        if len(matches) != 1:
+            raise ValueError("Ответ не совпадает с единственным текущим вопросом, вариантом и его цитатами. Откройте новый отчёт.")
+        resolved = matches[0]
+        accepted.append(AcceptedDecision(finding=resolved, outcome=answer.selected_outcome, exported_at=answers.exported_at))
+        dedup_set.remove(resolved)
 
     passport.verified_quotes_count = verified_quotes
     passport.hallucinations_filtered = filtered_hallucinations
@@ -459,6 +484,8 @@ def build_verified_audit_report(
             verdict = "ОБНАРУЖЕНЫ БЛОКЕРЫ. ПРОВЕРКА НЕПОЛНАЯ"
         rationale = "Выводы относятся только к извлечённому тексту. Для оценки всего документа нужна читаемая копия."
 
+    if accepted:
+        rationale += " Оценка учитывает выбранные владельцем решения из приложенного протокола."
     priority_fixes: list[str] = []
     for sd in dedup_set:
         if sd.severity == "CRITICAL":
@@ -500,4 +527,5 @@ def build_verified_audit_report(
         atomic_defects=dedup_atomic,
         set_defects=dedup_set,
         summary=summary,
+        accepted_decisions=accepted,
     )

@@ -630,12 +630,12 @@ def test_end_to_end_hybrid_pipeline_filters_hallucinations(tmp_path: Path) -> No
 
 
 def test_cli_structural_run_on_official_case_md_and_pdf(tmp_path: Path) -> None:
-    official_doc = Path(__file__).resolve().parent.parent / "_official_task" / "docs" / "requirements.md"
+    official_doc = Path(__file__).resolve().parent.parent / "docs" / "requirements.md"
     if not official_doc.exists():
         pytest.skip("Локальная копия _official_task/docs/requirements.md не найдена")
 
     out_md = tmp_path / "official_md.md"
-    assert cli_main([str(official_doc), str(out_md), "--structural-only", "--with-html"]) == 0
+    assert cli_main([str(official_doc), str(out_md), "--structural-only", "--with-html"]) == 3
     md_content = out_md.read_text(encoding="utf-8")
     assert "HTTP GET" in md_content
     assert out_md.with_suffix(".html").exists()
@@ -644,7 +644,7 @@ def test_cli_structural_run_on_official_case_md_and_pdf(tmp_path: Path) -> None:
     pdf_doc = tmp_path / "official_requirements.pdf"
     _build_spec_pdf(pdf_doc, official_doc.read_text(encoding="utf-8"))
     out_pdf_md = tmp_path / "official_pdf.md"
-    assert cli_main([str(pdf_doc), str(out_pdf_md), "--structural-only"]) == 0
+    assert cli_main([str(pdf_doc), str(out_pdf_md), "--structural-only"]) == 3
     pdf_report = out_pdf_md.read_text(encoding="utf-8")
     assert "HTTP GET" in pdf_report
     assert "типов данных" in pdf_report

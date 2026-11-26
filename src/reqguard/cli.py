@@ -16,6 +16,7 @@ from rich.table import Table
 
 from reqguard.config import load_settings
 from reqguard.llm_client import LLMGatewayError
+from reqguard.models import OwnerProtocol
 from reqguard.pipeline import run_audit_pipeline
 from reqguard.reporter_html import render_html_report
 from reqguard.reporter_md import render_markdown_report
@@ -90,6 +91,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Не открывать браузер автоматически при запуске --serve",
     )
+    parser.add_argument("--answers", type=Path, help="JSON-протокол решений владельца для этого входного документа")
+    parser.add_argument("--critic", action="store_true", help="Дополнительный проход модели для проверки замечаний с контрцитатами")
     return parser
 
 
@@ -128,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
             paths.append(args.output_path.with_suffix(".html"))
         if args.json_path:
             paths.append(args.json_path)
+        if args.answers:
+            paths.append(args.answers)
         for i, path in enumerate(paths):
             for previous in paths[:i]:
                 if path.resolve() == previous.resolve() or (
@@ -152,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
             settings=settings,
             progress_cb=lambda msg: console.print(f"[dim]•[/dim] {msg}"),
             allow_structural_only=args.structural_only,
+            answers=OwnerProtocol.model_validate_json(args.answers.read_bytes()) if args.answers else None,
+            critic=args.critic,
         )
 
         # Запись основного русского отчёта
@@ -190,9 +197,9 @@ def main(argv: list[str] | None = None) -> int:
         console.print(f"[bold green]Готово![/bold green] Отчёт сохранён: [underline]{out_path}[/underline]")
         for ef in extra_files:
             console.print(f"[dim]Дополнительный артефакт:[/dim] {ef}")
-        return 0
+        return report.exit_code
 
-    except (FileNotFoundError, ValueError, LLMGatewayError) as exc:
+    except (OSError, ValueError, LLMGatewayError) as exc:
         console.print(f"[bold red]Ошибка выполнения:[/bold red] {exc}")
         return 2
     except KeyboardInterrupt:
