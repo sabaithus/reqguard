@@ -170,10 +170,9 @@ def test_latency_finding_preserves_explicit_start_and_bound(tmp_path):
     source = tmp_path / "archive.md"
     source.write_text("## Нефункциональные требования\nСервис подтверждает запись не более 2 секунд после получения запроса.", encoding="utf8")
     findings = run_structural_scan(parse_document(source)).atomic_defects
-    sla = next(d for d in findings if d.criterion == "VERIFIABLE")
-    assert "момента старта" not in sla.problem
-    assert "60" not in sla.recommendation
-    assert sla.severity == "MINOR"
+    assert not any(d.criterion == "VERIFIABLE" for d in findings)
+    source.write_text("## Нефункциональные требования\nСервис подтверждает запись быстро.", encoding="utf8")
+    assert any(d.criterion == "VERIFIABLE" for d in run_structural_scan(parse_document(source)).atomic_defects)
 
 
 def test_model_critical_requires_blocked_decision():
@@ -184,3 +183,85 @@ def test_model_critical_requires_blocked_decision():
     finding.blocked_decision = "Отнести событие к текущему или предыдущему периоду?"
     assert finding.assessed_severity() == "CRITICAL"
     assert finding.blocked_decision in finding.reported_impact()
+
+
+def test_image_only_page_blocks_whole_document_score(tmp_path):
+    from fpdf import FPDF
+    from PIL import Image, ImageDraw
+    from reqguard.parser import _read_pdf_lines_pypdf_fallback
+    from reqguard.reporter_md import render_markdown_report
+
+    image = Image.new("RGB", (500, 180), "white")
+    ImageDraw.Draw(image).text((20, 40), "BR-2. Archive after 30 days.", fill="black")
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=12)
+    pdf.cell(text="BR-1. Archive records after 90 days.")
+    pdf.add_page()
+    pdf.image(image, w=170)
+    pdf.add_page()
+    source = tmp_path / "archive.pdf"
+    pdf.output(source)
+    assert _read_pdf_lines_pypdf_fallback(source)[2] == [2]
+    doc = parse_document(source)
+    assert doc.unreadable_pages == [2]
+    line = next(line for line in doc.lines if "BR-1" in line.raw_text)
+    first = dict(requirements=[dict(temp_id="a", title="Archive records", quote=line.raw_text,
+                                    line_start=line.line_no, line_end=line.line_no)], atomic_defects=[])
+    with patch.object(ResilientLLMClient, "_call_provider", side_effect=[json.dumps(first), '{"set_defects":[]}']):
+        report = run_audit_pipeline(source, LLMSettings(provider="gemini", api_key="test", primary_model="mock"))
+    assert report.passport.analysis_status == "partial_document"
+    assert report.summary.readiness_score is None
+    assert report.summary.can_start_testing is None
+    assert "2 из 3" in render_markdown_report(report)
+
+
+def test_explicit_priority_resolves_notification_question(tmp_path):
+    source = tmp_path / "policy.md"
+    text = ("## Политика\n* РТ-72. На карту за месяц отправляется не более одного push.\n"
+            "* РТ-85. При смене порога очередное достижение вызывает push независимо от прежней настройки.")
+    source.write_text(text, encoding="utf8")
+    issue = next(d for d in run_structural_scan(parse_document(source)).set_defects if d.decision)
+    assert len(issue.evidence) == 2
+    source.write_text(text + "\n* РТ-94. Месячный лимит имеет приоритет при смене настройки.", encoding="utf8")
+    assert not any(d.decision for d in run_structural_scan(parse_document(source)).set_defects)
+
+
+def test_irrelevant_model_title_cannot_establish_readiness(tmp_path):
+    source = tmp_path / "note.txt"
+    line = "Бананы лежат на столе."
+    source.write_text(line, encoding="utf8")
+    first = dict(requirements=[dict(temp_id="r", title="Открытие банковского счёта", quote=line,
+                                    line_start=1, line_end=1)], atomic_defects=[])
+    with patch.object(ResilientLLMClient, "_call_provider", side_effect=[json.dumps(first), '{"set_defects":[]}']):
+        report = run_audit_pipeline(source, LLMSettings(provider="gemini", api_key="test", primary_model="mock"))
+    assert not report.requirements
+    assert report.summary.can_start_development is None
+
+
+def test_reported_usage_preserves_provider_counters():
+    import httpx
+    client = ResilientLLMClient(LLMSettings(provider="gemini", api_key="test", primary_model="mock"))
+    client._response_data(httpx.Response(200, json={"usageMetadata": {"totalTokenCount": 88, "promptTokenCount": 10}}), "mock")
+    client._response_data(httpx.Response(200, json={"candidates": []}), "reserve")
+    assert [(u.model, u.counters) for u in client.token_usage] == [("mock", {"totalTokenCount": 88, "promptTokenCount": 10})]
+
+
+def test_paired_comparison_checks_both_reports(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    import compare_runs
+
+    source = tmp_path / "archive.txt"
+    line = "BR-1. Remove the record quickly."
+    source.write_text(line, encoding="utf8")
+    evidence = dict(quote=line, line_start=1, line_end=1)
+    baseline = dict(findings=[dict(problem="No deadline", severity="MAJOR", evidence=[evidence])])
+    first = dict(requirements=[dict(temp_id="r", doc_id="BR-1", title="Remove the record", **evidence)], atomic_defects=[])
+    monkeypatch.setattr(compare_runs, "load_settings", lambda *_: LLMSettings(provider="gemini", api_key="test", primary_model="mock"))
+    with patch.object(ResilientLLMClient, "_call_provider", side_effect=list(map(json.dumps, [baseline, first, {"set_defects": []}]))):
+        compare_runs.compare(source, tmp_path / "pair")
+    single = json.loads((tmp_path / "pair" / "single.json").read_text(encoding="utf8"))
+    agent = json.loads((tmp_path / "pair" / "agent.json").read_text(encoding="utf8"))
+    assert single["source_sha256"] == agent["passport"]["source_sha256"]
+    assert single["model"] == agent["passport"]["model_name"]
+    assert single["findings"][0]["verified_evidence"][0]["quote"] == line

@@ -51,6 +51,7 @@ class ParsedDocument:
     lines: list[DocumentLine]
     tables: list[ParsedTable]
     total_pages: int | None = None
+    unreadable_pages: list[int] = field(default_factory=list)
 
     @property
     def total_lines(self) -> int:
@@ -248,12 +249,12 @@ PDF_CANONICAL_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 PDF_NEW_BLOCK_START_RE = re.compile(
-    r"^(?:[-*+•]\s+|\d+[.)]\s+|(?:Ф|НФ|Т|И|Б|FR|NFR|REQ|BR|UC|US|AC|КП)-\d+|\d{3}\.\s+|\{|\[|\})",
+    r"^(?:[-*+•]\s+|\d+[.)]\s+|[A-ZА-ЯЁ]{1,8}-\d+|\d{3}\.\s+|\{|\[|\})",
     re.IGNORECASE,
 )
 
 
-def _read_pdf_lines_pypdf_fallback(path: Path) -> tuple[list[tuple[str, int | None]], int]:
+def _read_pdf_lines_pypdf_fallback(path: Path) -> tuple[list[tuple[str, int | None]], int, list[int]]:
     from pypdf import PdfReader
 
     reader = PdfReader(str(path))
@@ -263,8 +264,14 @@ def _read_pdf_lines_pypdf_fallback(path: Path) -> tuple[list[tuple[str, int | No
 
     raw_items: list[tuple[str, int | None]] = []
     extracted_chars = 0
+    unreadable_pages = []
     for page_idx, page in enumerate(reader.pages, start=1):
         text = page.extract_text() or ""
+        if not text.strip():
+            content = page.get_contents()
+            paint = {b"Do", b"INLINE IMAGE", b"S", b"f", b"f*", b"B", b"sh", b"s", b"F", b"B*", b"b", b"b*"}
+            if content is not None and any(op in paint for _, op in content.operations):
+                unreadable_pages.append(page_idx)
         extracted_chars += len(text.strip())
         for line in text.splitlines():
             raw_items.append((line, page_idx))
@@ -274,10 +281,10 @@ def _read_pdf_lines_pypdf_fallback(path: Path) -> tuple[list[tuple[str, int | No
             f"PDF-файл '{path.name}' не содержит текстового слоя (вероятно, это скан без OCR). "
             "Передайте PDF с текстовым слоем, DOCX или Markdown."
         )
-    return raw_items, total_pages
+    return raw_items, total_pages, unreadable_pages
 
 
-def _read_pdf_lines(path: Path) -> tuple[list[tuple[str, int | None]], int]:
+def _read_pdf_lines(path: Path) -> tuple[list[tuple[str, int | None]], int, list[int]]:
     try:
         import pdfplumber
     except ImportError:
@@ -292,6 +299,7 @@ def _read_pdf_lines(path: Path) -> tuple[list[tuple[str, int | None]], int]:
             all_sizes: list[float] = []
             page_data: list[tuple[int, list, list[dict]]] = []
             extracted_chars = 0
+            unreadable_pages = []
 
             for page_idx, page in enumerate(pdf.pages, start=1):
                 tables = page.find_tables() or []
@@ -312,6 +320,8 @@ def _read_pdf_lines(path: Path) -> tuple[list[tuple[str, int | None]], int]:
                     for row in t.extract() or []:
                         page_text_len += sum(len((c or "").strip()) for c in row)
                 extracted_chars += page_text_len
+                if not page_text_len and (page.images or page.curves or page.rects or page.lines):
+                    unreadable_pages.append(page_idx)
                 page_data.append((page_idx, tables, words))
 
             if extracted_chars == 0:
@@ -424,7 +434,7 @@ def _read_pdf_lines(path: Path) -> tuple[list[tuple[str, int | None]], int]:
 
                     is_req_line = bool(
                         re.match(
-                            r"^(?:[-*+•]\s*)?(?:Ф|НФ|Т|И|Б|FR|NFR|REQ|BR|UC|US|AC|КП)-\d+",
+                            r"^(?:[-*+•]\s*)?[A-ZА-ЯЁ]{1,8}-\d+",
                             text,
                             re.IGNORECASE,
                         )
@@ -474,7 +484,7 @@ def _read_pdf_lines(path: Path) -> tuple[list[tuple[str, int | None]], int]:
                             "height": height,
                         }
 
-            return raw_items, total_pages
+            return raw_items, total_pages, unreadable_pages
     except ValueError:
         raise
     except Exception:
@@ -530,14 +540,20 @@ def parse_document(path: str | Path) -> ParsedDocument:
     ext = file_path.suffix.lower()
 
     total_pages: int | None = None
+    unreadable_pages = []
     if ext in (".md", ".markdown", ".txt"):
-        text = raw_bytes.decode("utf-8-sig")
+        try:
+            text = raw_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Текст не читается как UTF-8. Сохраните исходный документ в UTF-8.") from exc
+        if "\x00" in text or "\ufffd" * 3 in text:
+            raise ValueError("Текст содержит двоичные данные или потерянные символы. Передайте читаемый оригинал.")
         raw_items = [(line, None) for line in text.splitlines()]
         fmt = "Markdown" if ext in (".md", ".markdown") else "PlainText"
     elif ext == ".pdf":
         from pypdf.errors import PyPdfError
         try:
-            raw_items, total_pages = _read_pdf_lines(file_path)
+            raw_items, total_pages, unreadable_pages = _read_pdf_lines(file_path)
         except PyPdfError as exc:
             raise ValueError("PDF повреждён или недоступен для чтения.") from exc
         fmt = "PDF"
@@ -555,7 +571,7 @@ def parse_document(path: str | Path) -> ParsedDocument:
     if not any(line.strip() for line, _ in raw_items):
         raise ValueError(f"Документ '{file_path.name}' пуст.")
 
-    return _build_ast_from_raw_lines(
+    document = _build_ast_from_raw_lines(
         raw_items=raw_items,
         fallback_title=file_path.stem,
         source_path=file_path,
@@ -563,3 +579,5 @@ def parse_document(path: str | Path) -> ParsedDocument:
         sha256=sha256,
         total_pages=total_pages,
     )
+    document.unreadable_pages = unreadable_pages
+    return document

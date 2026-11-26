@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from reqguard.models import (
     AtomicDefect,
+    DecisionScenario,
     RequirementCategory,
     RequirementItem,
     SetDefect,
@@ -20,7 +21,7 @@ from reqguard.parser import DocumentLine, ParsedDocument, ParsedTable, ParsedTab
 
 
 EXPLICIT_REQ_ID_RE = re.compile(
-    r"^\s*(?:[-*+•]\s*)?\*{0,2}((?:Ф|НФ|Т|И|Б|FR|NFR|REQ|BR|UC|US|AC|КП)-\d+(?:\.\d+)?)\.?(\*{0,2})\s*(.+)$",
+    r"^\s*(?:[-*+•]\s*)?\*{0,2}((?:[A-ZА-ЯЁ]{1,8})-\d+(?:\.\d+)*)\.?(\*{0,2})\s+(.+)$",
     re.IGNORECASE,
 )
 
@@ -34,11 +35,6 @@ MUTATING_KEYWORDS_RE = re.compile(
     r"save|create|update|delete|setlimit|savelimit|upsert|patch)",
     re.IGNORECASE,
 )
-LATENCY_WITHOUT_PERCENTILE_RE = re.compile(
-    r"(?:в\s+течение\s+(?:минуты|секунды|\d+\s*(?:мс|сек|мин|час))|не\s+более\s+\d+\s*(?:мс|сек|мин))",
-    re.IGNORECASE,
-)
-PERCENTILE_OR_LOAD_RE = re.compile(r"(?:\bp9[059]\b|\b9[59]\s*%|\brps\b|\btps\b|нагрузк)", re.IGNORECASE)
 HTTP_STATUS_HEADING_RE = re.compile(r"^(?:#{1,6}\s*)?(\d{3})\.\s*(.+)$")
 
 
@@ -288,13 +284,13 @@ _MONTH_NAMES = (
 
 
 def _check_accounting_month(doc: ParsedDocument) -> list[SetDefect]:
-    rules = [line for line in doc.lines if re.search(
-        r"(?:месяц определяется по дате|используется календарный месяц) (совершения|проведения) покупки", line.raw_text, re.I
-    )]
+    selection = re.compile(r"(?:месяц определяется по дате|используется календарный месяц) (совершения|проведения) покупки"
+                           r"|покупка относится к тому месяцу, в котором она была (совершена|проведена)", re.I)
+    rules = [(line, match) for line in doc.lines if (match := selection.search(line.raw_text))]
     if len(rules) != 1:
         return []
-    rule = rules[0]
-    purchase_date = "совершения покупки" in rule.raw_text.lower()
+    rule, match = rules[0]
+    purchase_date = (match.group(1) or match.group(2)).lower().startswith("соверш")
     findings = []
     for table in doc.tables:
         if len(table.headers) != 3 or not any(word in table.headers[2].lower() for word in ("ожидаем", "результат")):
@@ -303,14 +299,16 @@ def _check_accounting_month(doc: ParsedDocument) -> list[SetDefect]:
             if len(row.cells) != 3:
                 continue
             initial, action, expected = [c.lower() for c in row.cells]
-            if "покупк" not in initial or "провести" not in action:
+            if "покупк" not in initial or not re.search(r"\b(?:провести|проведение)\b", action):
                 continue
             event_text = initial if purchase_date else action
             months = [m for m, _ in _MONTH_NAMES if re.search(r"\b\d{1,2}\s+" + m + r"\b", event_text)]
+            months.extend(_MONTH_NAMES[int(m) - 1][0] for m in re.findall(
+                r"\b(?:0?[1-9]|[12]\d|3[01])\.(0[1-9]|1[0-2])(?:\.\d{4})?\b", event_text))
             expected_months = []
             nominatives = ("январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь")
             for (month, adjective), name in zip(_MONTH_NAMES, nominatives):
-                if re.search(adjective + r"\s+сч[её]тчик вырос", expected) or re.search(
+                if re.search(r"расходы " + month + r"\s+(?:выросли|увеличились)", expected) or re.search(adjective + r"\s+сч[её]тчик вырос", expected) or re.search(
                     r"расходы за " + name + r"\s+(?:выросли|увеличились)", expected
                 ):
                     expected_months.append(month)
@@ -323,7 +321,59 @@ def _check_accounting_month(doc: ParsedDocument) -> list[SetDefect]:
                 impact="Одна реализация не может одновременно пройти этот пример и выполнить правило учёта.",
                 question_for_analyst="Какой источник следует исправить: правило выбора даты или ожидаемый результат?",
                 recommendation="Согласовать правило и пример, затем повторить проверку на границе месяцев.",
+                decision=DecisionScenario(
+                    scenario=f"{row.cells[0]}. Действие: {row.cells[1]}.",
+                    alternatives=(
+                        f"Сохранить правило выбора даты. В примере учёт относится к месяцу даты из условия «{event_text}».",
+                        f"Сохранить ожидаемый результат «{row.cells[2]}». Согласовать правило выбора месяца для таких операций.",
+                    ),
+                    acceptance_check="Повторить покупку и проведение из примера на границе месяцев. Проверить изменение обоих месячных счётчиков.",
+                ),
                 evidence=[_make_span(rule), _make_span(doc.lines[row.line_no - 1])], origin="STRUCTURAL",
+            ))
+    return findings
+
+
+def _check_notification_limit(doc: ParsedDocument) -> list[SetDefect]:
+    """Ограниченная проверка пары правил об одном канале, карте и месяце."""
+    findings = []
+    quota = re.compile(r"(?:максимум|не (?:более|больше))\s+(?:один|одного|1)\s+(?:тако(?:й|го)\s+)?(?:push|пуш)", re.I)
+    repeats = re.compile(r"(?:достижение|пересечение)[^.!?]{0,65}(?:вызывает|приводит к)\s+(?:push|пуш)", re.I)
+    independent = re.compile(r"(?:независимо|вне зависимости)\s+от[^.!?]{0,95}(?:настройк|уведомлен|отправк)", re.I)
+    exception = re.compile(r"приоритет|исключени|кроме|с уч[её]том.{0,40}(?:лимита|ограничения)|если.{0,35}(?:ещ[её] не|не был)|повторн\w* (?:push|пуш) не", re.I)
+    if any(exception.search(line.raw_text) and re.search(r"порог|месячн\w* (?:лимит|ограничен)|повторн\w* (?:push|пуш)", line.raw_text, re.I)
+           for line in doc.lines if line.kind in ("text", "list_item", "table_row")):
+        return []
+    for cap in doc.lines:
+        text = cap.raw_text.lower()
+        if not (quota.search(text) and "карт" in text and "месяц" in text):
+            continue
+        if re.search(r"(?:push|пуш)\s+(?:о|об|для|при)\s+", text) and "порог" not in text:
+            continue
+        section = [line for line in doc.lines if line.section_path == cap.section_path and line.kind in ("list_item", "text")]
+        # Отдельная оговорка о приоритете требует смыслового ревью всей секции.
+        if any(exception.search(line.raw_text) for line in section):
+            continue
+        for reset in section:
+            rule = reset.raw_text.lower()
+            if cap == reset or not ("порог" in rule and repeats.search(rule) and independent.search(rule)):
+                continue
+            if not re.search(r"(?:изменени|смен)[а-я]*\s+порога", rule):
+                continue
+            findings.append(SetDefect(
+                defect_id="notification-limit", criterion="CONSISTENT", severity="CRITICAL",
+                title="Месячный лимит и повторное достижение порога задают разные исходы",
+                problem="Если карта уже получила push в этом месяце, месячный лимит запрещает следующий. Правило смены настройки требует push при новом достижении порога независимо от прежней настройки.",
+                impact="Разработчик и QA могут выбрать разные ожидаемые количества уведомлений для одной последовательности событий.",
+                question_for_analyst="Должна ли эта же карта получить второй push в том же месяце после повышения и последующего достижения нового порога?",
+                recommendation="Зафиксировать приоритет правил и добавить сценарий повторного достижения порога.",
+                decision=DecisionScenario(
+                    scenario="Одна карта уже получила push. В том же месяце порог повышают выше накопленной суммы. Следующая покупка доводит расходы до нового порога.",
+                    alternatives=("Сохранить месячный лимит карты. Всего за месяц один push.",
+                                  "Разрешить повторную отправку после смены порога. Всего за месяц два push."),
+                    acceptance_check="Воспроизвести эту последовательность для одной карты и сравнить количество отправок с выбранным исходом.",
+                ),
+                evidence=[_make_span(cap), _make_span(reset)], origin="STRUCTURAL",
             ))
     return findings
 
@@ -382,7 +432,7 @@ def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
                 )
             )
 
-    # 2. Проверка неизмеримых НФТ задержки (без перцентиля и профиля нагрузки)
+    # Неопределённая скорость без заданного числового предела.
     for dl in doc.lines:
         if dl.kind in ("heading", "empty", "table_row", "table_sep", "code"):
             continue
@@ -391,7 +441,9 @@ def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
         is_nfr_sec = "нефункциональн" in sec_low or "nfr" in sec_low
         is_sla_fallback = (not sec_low) and any(w in text.lower() for w in ("сервис", "push", "ответ", "задерж"))
         if is_nfr_sec or is_sla_fallback:
-            if LATENCY_WITHOUT_PERCENTILE_RE.search(text) and not PERCENTILE_OR_LOAD_RE.search(text):
+            if re.search(r"\b(?:быстро|оперативно|своевременно)\b", text, re.I) and not re.search(
+                r"\d+\s*(?:мс|сек|мин|час)|в течение (?:минуты|секунды|часа)", text, re.I
+            ):
                 linked = req_by_line.get(dl.line_no)
                 atomic_defects.append(
                     AtomicDefect(
@@ -400,9 +452,9 @@ def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
                         doc_id=linked.doc_id if linked else None,
                         criterion="VERIFIABLE",
                         severity="MINOR",
-                        problem="В строке с предельным временем не указан профиль нагрузки или перцентиль.",
-                        impact="Для нагрузочного теста может потребоваться дополнительный профиль испытаний.",
-                        recommendation="Сохранить заданный предел. Уточнить применимость профиля нагрузки при планировании испытаний.",
+                        problem="Скорость описана качественным словом без измеримого предела в этой формулировке.",
+                        impact="По этому пункту QA не может определить, какой результат испытания считать успешным.",
+                        recommendation="Указать применимый предел или ссылку на соответствующее требование.",
                         evidence=[_make_span(dl)],
                         origin="STRUCTURAL",
                     )
@@ -503,6 +555,7 @@ def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
             )
 
     set_defects.extend(_check_accounting_month(doc))
+    set_defects.extend(_check_notification_limit(doc))
 
     # 4. Статический анализ контрактов REST API
     _scan_rest_api_contracts(doc, set_defects, next_sid)
@@ -654,22 +707,24 @@ def _scan_rest_api_contracts(
     # 4c. Несоответствие Content-Type: application/json и пустого тела запроса
     ct_lines = [dl for dl in doc.lines if "content-type" in dl.raw_text.lower() and "application/json" in dl.raw_text.lower()]
     no_body_lines = [dl for dl in doc.lines if "тело не используется" in dl.raw_text.lower()]
-    if ct_lines and no_body_lines:
-        c_dl, nb_dl = ct_lines[0], no_body_lines[0]
+    for c_dl in ct_lines:
+        nb_dl = next((line for line in no_body_lines if line.section_path == c_dl.section_path), None)
+        if nb_dl is None:
+            continue
         set_defects.append(
             SetDefect(
                 defect_id=next_sid(),
                 related_req_ids=[],
                 criterion="CONSISTENT",
                 severity="MINOR",
-                title="Противоречие в секции Request body: указан Content-Type application/json при отсутствии тела",
+                title="Нужно уточнить обязательность Content-Type при отсутствии тела",
                 problem=(
-                    "В описании тела запроса одновременно требуется заголовок `Content-Type: application/json` "
+                    "В описании тела запроса одновременно указан заголовок `Content-Type: application/json` "
                     "и утверждается, что тело запроса не используется."
                 ),
-                impact="Некоторые HTTP-клиенты, WAF и API-шлюзы отклоняют GET-запросы без тела с заголовком `Content-Type: application/json` как некорректный JSON.",
-                question_for_analyst="Должны ли параметры передаваться в JSON-теле POST/PUT запроса или заголовок Content-Type в запросе лишний?",
-                recommendation="При переходе на PUT/POST перенести параметры в JSON-тело; для GET-запросов убрать требование заголовка `Content-Type: application/json`.",
+                impact="Клиенту и QA нужно знать, какие заголовки обязательны для запроса без тела.",
+                question_for_analyst="Обязателен ли Content-Type для этого запроса без тела?",
+                recommendation="Зафиксировать обязательность заголовка в контракте и примере запроса.",
                 evidence=[_make_span(c_dl), _make_span(nb_dl)],
                 origin="STRUCTURAL",
             )
@@ -709,8 +764,8 @@ def _scan_rest_api_contracts(
                 defect_id=next_sid(),
                 related_req_ids=[],
                 criterion="INTERFACE_INTEGRITY",
-                severity="MAJOR",
-                title="Несогласованность типов данных одних и тех же атрибутов между запросом и ответом REST API",
+                severity="MINOR",
+                title="Различие типов данных на входе и выходе REST API требует подтверждения",
                 problem=(
                     "Атрибуты, маппящиеся в одни и те же поля БД, меняют тип данных между входом и выходом метода: "
                     + ", ".join(mismatched_names)

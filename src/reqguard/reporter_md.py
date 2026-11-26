@@ -64,6 +64,9 @@ def render_markdown_report(report: AuditReport) -> str:
     out.append(f"| **Провайдер и модель LLM** | `{p.provider}` / `{p.model_name}` (ответов с текстом: {p.llm_calls_count}) |")
     out.append(f"| **Версия агента** | `{p.agent_version}` |")
     out.append(f"| **Длительность анализа** | {p.duration_sec:.2f} сек |")
+    for idx, usage in enumerate(p.token_usage, 1):
+        counters = ", ".join(f"{key}={value}" for key, value in usage.counters.items())
+        out.append(f"| **Токены по данным API, ответ {idx} с метриками** | {_esc_md_cell(usage.model)} · {counters} |")
     out.append(
         f"| **Контроль анти-галлюцинаций** | Привязок к источнику до объединения: **{p.verified_quotes_count}**, отклонено записей: **{p.hallucinations_filtered}** |"
     )
@@ -170,6 +173,11 @@ def render_markdown_report(report: AuditReport) -> str:
             out.append(f"- **Последствия для бизнеса, разработки и QA:** {sd.impact}")
             out.append(f"- **Вопрос системному аналитику / Product Owner:** *{sd.question_for_analyst}*")
             out.append(f"- **Рекомендация по устранению:** {sd.recommendation}")
+            if sd.decision:
+                out.append(f"- **Сценарий для согласования:** {sd.decision.scenario}")
+                for index, option in enumerate(sd.decision.alternatives, 1):
+                    out.append(f"  {index}. {option}")
+                out.append(f"- **Проверка после решения владельца:** {sd.decision.acceptance_check}")
             out.append("")
 
     # 5. Сводка

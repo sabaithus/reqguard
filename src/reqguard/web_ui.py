@@ -226,6 +226,7 @@ STUDIO_HTML = r"""<!DOCTYPE html>
         <div class="btn-row">
           <button class="btn" id="dlMdBtn">Скачать report.md</button>
           <button class="btn" id="dlHtmlBtn">Скачать report.html</button>
+          <button class="btn" id="openDecisionBtn" hidden>Согласовать спорные требования</button>
           <button class="btn" id="dlJsonBtn">Скачать report.json</button>
         </div>
       </div>
@@ -359,6 +360,10 @@ STUDIO_HTML = r"""<!DOCTYPE html>
 
       document.getElementById('docTitle').textContent = 'Аудит ТЗ: «' + p.document_title + '»';
       document.getElementById('verdictRationale').textContent = s.verdict_rationale;
+      if (p.unreadable_pages?.length) {
+        document.getElementById('verdictRationale').textContent += ' Страницы с графикой без текста: ' + p.unreadable_pages.join(', ') + '.';
+      }
+      document.getElementById('openDecisionBtn').hidden = !r.set_defects.some(d => d.decision);
       document.getElementById('passportRow').innerHTML =
         `<span>Файл: <b>${esc(p.source_file)}</b> (${esc(p.source_format)}, строк: ${p.total_lines})</span>` +
         `<span>Модель: <b>${esc(p.provider)} / ${esc(p.model_name)}</b></span>` +
@@ -393,6 +398,11 @@ STUDIO_HTML = r"""<!DOCTYPE html>
     }
     document.getElementById('dlMdBtn').onclick = () => state.data && downloadText('report.md', state.data.markdown, 'text/markdown;charset=utf-8');
     document.getElementById('dlHtmlBtn').onclick = () => state.data && downloadText('report.html', state.data.html, 'text/html;charset=utf-8');
+    document.getElementById('openDecisionBtn').onclick = () => {
+      const url = URL.createObjectURL(new Blob([state.data.html], {type: 'text/html;charset=utf-8'}));
+      window.open(url + '#decisions', '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    };
     document.getElementById('dlJsonBtn').onclick = () => state.data && downloadText('report.json', JSON.stringify(state.data.report, null, 2), 'application/json;charset=utf-8');
 
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -455,11 +465,14 @@ STUDIO_HTML = r"""<!DOCTYPE html>
             <p><b>Риск:</b> ${esc(d.impact)}</p>
             <div class="q-box">
               <span><b>Вопрос аналитику:</b> ${esc(d.question_for_analyst)}</span>
-              <button class="btn" onclick='copyTxt(this, ${JSON.stringify(d.question_for_analyst)})'>Копировать</button>
+              <button class="btn" data-question="${esc(d.question_for_analyst)}">Копировать</button>
             </div>
             <p style="margin-bottom:0"><b>Рекомендация:</b> ${esc(d.recommendation)}</p>
           </div>
         `).join('') || '<div class="card">По текущему фильтру замечаний не найдено.</div>';
+        host.querySelectorAll('[data-question]').forEach(btn => {
+          btn.onclick = () => copyTxt(btn, btn.dataset.question);
+        });
         return;
       }
 

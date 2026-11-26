@@ -144,6 +144,12 @@ class AtomicDefect(BaseModel):
     origin: FindingOrigin = Field(default="LLM")
 
 
+class DecisionScenario(BaseModel):
+    scenario: str
+    alternatives: tuple[str, str]
+    acceptance_check: str
+
+
 class SetDefect(BaseModel):
     """Замечание ко всему набору требований / межсекционный дефект (ISO 29148 п. 5.2.6 / IEEE 830 п. 4.3)."""
 
@@ -160,9 +166,15 @@ class SetDefect(BaseModel):
     question_for_analyst: str = Field(
         description="Конкретный вопрос бизнесу / системному аналитику для снятия блокера"
     )
+    decision: DecisionScenario | None = None
     recommendation: str = Field(description="Как согласовать разделы между собой")
     evidence: list[SourceSpan] = Field(min_length=1)
     origin: FindingOrigin = Field(default="LLM")
+
+
+class TokenUsage(BaseModel):
+    model: str
+    counters: dict[str, int]
 
 
 class RunPassport(BaseModel):
@@ -174,13 +186,15 @@ class RunPassport(BaseModel):
     source_sha256: str
     total_lines: int
     total_pages: int | None = None
+    unreadable_pages: list[int] = Field(default_factory=list)
     run_timestamp: str
     provider: str
     model_name: str
     agent_version: str
-    analysis_status: Literal["complete", "structural_only", "phase2_failed", "insufficient_input", "coverage_incomplete", "unverified_findings", "unknown"] = "unknown"
+    analysis_status: Literal["complete", "partial_document", "structural_only", "phase2_failed", "insufficient_input", "coverage_incomplete", "unverified_findings", "unknown"] = "unknown"
     duration_sec: float
     http_attempt_models: list[str] = Field(default_factory=list)
+    token_usage: list[TokenUsage] = Field(default_factory=list)
     llm_calls_count: int = 0
     verified_quotes_count: int = 0
     hallucinations_filtered: int = 0
@@ -188,8 +202,9 @@ class RunPassport(BaseModel):
 
     @property
     def status_label(self) -> str:
-        return {
+        label = {
             "complete": "Обе фазы завершены",
+            "partial_document": "Проверена только доступная часть PDF",
             "coverage_incomplete": "Часть каталога выделена только статическим сканером",
             "phase2_failed": "Вторая фаза модели не завершена",
             "structural_only": "Только статическая проверка",
@@ -197,6 +212,10 @@ class RunPassport(BaseModel):
             "unverified_findings": "Часть утверждений модели отклонена при проверке доказательств",
             "unknown": "Статус отсутствует в паспорте этой версии",
         }[self.analysis_status]
+        if self.unreadable_pages:
+            pages = ", ".join(map(str, self.unreadable_pages))
+            return f"{label}. Страницы с графикой без извлечённого текста: {pages} из {self.total_pages}. Требуется текстовая копия или OCR."
+        return label
 
 
 class AuditSummary(BaseModel):

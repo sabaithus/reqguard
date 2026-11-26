@@ -17,6 +17,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from reqguard.config import LLMSettings
+from reqguard.models import TokenUsage
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -85,6 +86,7 @@ class ResilientLLMClient:
     def __init__(self, settings: LLMSettings) -> None:
         self.settings = settings
         self.http_models: list[str] = []
+        self.token_usage: list[TokenUsage] = []
         self.calls_count: int = 0
         self.last_used_model: str = settings.primary_model
 
@@ -145,7 +147,7 @@ class ResilientLLMClient:
                         time.sleep(wait_s)
                     else:
                         break
-                except (ValidationError, ValueError, json.JSONDecodeError) as exc:
+                except (ValidationError, ValueError, KeyError, IndexError, AttributeError, TypeError) as exc:
                     err_msg = f"[{model_name} attempt {attempt}] Ошибка схемы JSON: {exc}"
                     errors.append(err_msg)
                     if attempt < self.settings.max_retries:
@@ -175,6 +177,21 @@ class ResilientLLMClient:
             f"Не удалось получить валидный ответ ни от одной модели ({models_to_try}):\n  - {joined}"
         )
 
+    def _response_data(self, response: httpx.Response, model: str) -> dict:
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("API вернуло ответ без объекта JSON.")
+        raw = data.get("usageMetadata") or data.get("usage") or data
+        keys = ("promptTokenCount", "candidatesTokenCount", "thoughtsTokenCount", "totalTokenCount",
+                "cachedContentTokenCount", "prompt_tokens", "completion_tokens", "total_tokens",
+                "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens",
+                "prompt_eval_count", "eval_count")
+        if isinstance(raw, dict):
+            counts = {k: raw[k] for k in keys if type(raw.get(k)) is int and raw[k] >= 0}
+            if counts:
+                self.token_usage.append(TokenUsage(model=model, counters=counts))
+        return data
+
     def _call_provider(self, model_name: str, system_prompt: str, user_prompt: str) -> str:
         p = self.settings.provider
         timeout = httpx.Timeout(self.settings.timeout_sec, connect=15.0)
@@ -201,7 +218,7 @@ class ResilientLLMClient:
                     gen_cfg.pop("thinkingConfig", None)
                     resp = client.post(url, headers={"x-goog-api-key": self.settings.api_key}, json=payload)
                 resp.raise_for_status()
-                data = resp.json()
+                data = self._response_data(resp, model_name)
                 candidates = data.get("candidates") or []
                 if not candidates:
                     raise ValueError(f"Пустой список candidates от Gemini: {data}")
@@ -228,8 +245,11 @@ class ResilientLLMClient:
                     payload.pop("response_format", None)
                     resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
+                data = self._response_data(resp, model_name)
+                choices = data.get("choices")
+                if not choices or not isinstance(choices[0].get("message", {}).get("content"), str):
+                    raise ValueError("OpenAI-совместимый API вернул ответ без текста.")
+                return choices[0]["message"]["content"]
 
             if p == "anthropic":
                 url = f"{self.settings.base_url}/messages"
@@ -247,7 +267,7 @@ class ResilientLLMClient:
                 }
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
-                data = resp.json()
+                data = self._response_data(resp, model_name)
                 return "".join(
                     block.get("text", "")
                     for block in data.get("content", [])
@@ -268,7 +288,7 @@ class ResilientLLMClient:
                 }
                 resp = client.post(url, json=payload)
                 resp.raise_for_status()
-                data = resp.json()
+                data = self._response_data(resp, model_name)
                 return data.get("message", {}).get("content", "")
 
         raise LLMGatewayError(f"Неизвестный провайдер LLM: {p}")

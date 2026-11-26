@@ -3,13 +3,35 @@
 from __future__ import annotations
 
 import html
+import json
 
 from reqguard.models import (
     AuditReport,
     CATEGORY_LABELS_RU,
     CRITERION_LABELS_RU,
     SEVERITY_LABELS_RU,
+    SetDefect,
 )
+
+
+def _decision_control(finding: SetDefect) -> str:
+    decision = finding.decision
+    if decision is None:
+        return ""
+    payload = {
+        "defect_id": finding.defect_id, "question": finding.question_for_analyst,
+        "evidence": [span.model_dump() for span in finding.evidence], **decision.model_dump(),
+    }
+    options = "".join(
+        f'<option value="{i}">{html.escape(option)}</option>' for i, option in enumerate(decision.alternatives)
+    )
+    return f"""<fieldset class="decision" data-case="{html.escape(json.dumps(payload, ensure_ascii=False), quote=True)}">
+      <legend>Решение владельца требований</legend>
+      <p>{html.escape(decision.scenario)}</p>
+      <label>Ожидаемый исход <select><option value="">Ожидает решения</option>{options}
+      <option value="deferred">Отложить решение</option></select></label>
+      <p>Проверка QA после согласования: {html.escape(decision.acceptance_check)}</p>
+    </fieldset>"""
 
 
 def render_html_report(report: AuditReport) -> str:
@@ -57,6 +79,7 @@ def render_html_report(report: AuditReport) -> str:
               <p><strong>Бизнес- и тех. риск:</strong> {html.escape(sd.impact)}</p>
               <div class="analyst-q"><strong>Вопрос аналитику / PO:</strong> {html.escape(sd.question_for_analyst)}</div>
               <p><strong>Рекомендация:</strong> {html.escape(sd.recommendation)}</p>
+              {_decision_control(sd)}
             </div>
             """
         )
@@ -96,6 +119,7 @@ def render_html_report(report: AuditReport) -> str:
         )
 
     fixes_li = "".join(f"<li>{html.escape(f)}</li>" for f in s.priority_fixes)
+    export_button = '<button class="filter-btn" onclick="exportDecisions()">Скачать протокол решений (JSON)</button>' if any(d.decision for d in report.set_defects) else ""
 
     return f"""<!DOCTYPE html>
 <html lang="ru">
@@ -146,7 +170,7 @@ def render_html_report(report: AuditReport) -> str:
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="container" id="audit" data-source="{html.escape(p.source_sha256)}" data-version="{html.escape(p.agent_version)}" data-run="{html.escape(p.run_timestamp)}">
     <div class="hero">
       <div class="verdict-banner">{html.escape(s.verdict)}</div>
       <h1>Аудит качества ТЗ: «{html.escape(p.document_title)}»</h1>
@@ -180,8 +204,9 @@ def render_html_report(report: AuditReport) -> str:
       <button class="filter-btn" onclick="filterCards('MINOR', this)">Незначительные ({s.minor_count})</button>
     </div>
 
-    <h2>Проверка всего набора требований и контрактов ({len(report.set_defects)})</h2>
+    <h2 id="decisions">Проверка всего набора требований и контрактов ({len(report.set_defects)})</h2>
     {''.join(set_cards_html)}
+    {export_button}
 
     <h2>Индивидуальная проверка требований ({len(report.atomic_defects)})</h2>
     {''.join(atomic_cards_html)}
@@ -193,6 +218,24 @@ def render_html_report(report: AuditReport) -> str:
     </table>
   </div>
   <script>
+    function exportDecisions() {{
+      const run = document.getElementById('audit').dataset;
+      const decisions = Array.from(document.querySelectorAll('.decision'), field => {{
+        const entry = JSON.parse(field.dataset.case);
+        const choice = field.querySelector('select').value;
+        entry.status = choice === '' ? 'pending' : choice === 'deferred' ? 'deferred' : 'selected';
+        entry.selected_outcome = entry.status === 'selected' ? entry.alternatives[Number(choice)] : null;
+        return entry;
+      }});
+      const record = {{source_sha256: run.source, agent_version: run.version, run_timestamp: run.run,
+        exported_at: new Date().toISOString(), decisions}};
+      const url = URL.createObjectURL(new Blob([JSON.stringify(record, null, 2)], {{type: 'application/json'}}));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'reqguard-decisions-' + run.source.slice(0, 12) + '.json';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }}
     function filterCards(sev, btn) {{
       document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');

@@ -251,7 +251,7 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
                         ex.evidence.append(sp)
                         existing_line_pairs.add((sp.line_start, sp.line_end))
                 ex.related_req_ids = sorted(set(ex.related_req_ids) | set(cand.related_req_ids))
-                if len(cand.problem) > len(ex.problem) and cand.origin == "LLM":
+                if ex.decision is None and len(cand.problem) > len(ex.problem) and cand.origin == "LLM":
                     ex.title = cand.title
                     ex.problem = cand.problem
                     ex.impact = cand.impact
@@ -449,6 +449,15 @@ def build_verified_audit_report(
         else:
             verdict = "ОБНАРУЖЕНЫ БЛОКЕРЫ. ПРОВЕРКА НЕПОЛНАЯ"
             rationale = reason + " " + rationale
+
+    if passport.unreadable_pages:
+        readiness_score = None
+        if not crit_n:
+            can_dev = can_qa = None
+            verdict = "ГОТОВНОСТЬ НЕ УСТАНОВЛЕНА"
+        else:
+            verdict = "ОБНАРУЖЕНЫ БЛОКЕРЫ. ПРОВЕРКА НЕПОЛНАЯ"
+        rationale = "Выводы относятся только к извлечённому тексту. Для оценки всего документа нужна читаемая копия."
 
     priority_fixes: list[str] = []
     for sd in dedup_set:

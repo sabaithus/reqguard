@@ -4,6 +4,7 @@ AST-парсинг → Детерминированный сканер → LLM �
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ from reqguard.models import (
     AtomicCriterion,
     AtomicDefect,
     AuditReport,
+    DecisionScenario,
     RequirementCategory,
     RequirementItem,
     RunPassport,
@@ -90,6 +92,7 @@ class _LLMRawSetDefect(_ModelFinding):
     related_req_ids: list[str] = Field(default_factory=list)
     criterion: SetCriterion = "CONSISTENT"
     title: str
+    decision: DecisionScenario | None = None
     problem: str
     question_for_analyst: str
     recommendation: str
@@ -126,14 +129,26 @@ def _merge_requirements(
             dropped_unverified += 1
             continue
 
+        source_text = " ".join(verified_span.quote.split())
+        title = raw.title.strip()
+        if not title or title.casefold() not in source_text.casefold():
+            title = source_text if len(source_text) <= 180 else source_text[:177].rsplit(" ", 1)[0] + "…"
+            anchored = any(r.source.line_start <= verified_span.line_end and verified_span.line_start <= r.source.line_end for r in baseline)
+            words = re.findall(r"[^\W\d_]{4,}", raw.title.casefold())
+            if not anchored and not any(word[:4] in source_text.casefold() for word in words):
+                dropped_unverified += 1
+                continue
+        if clean_doc_id and not re.search(r"(?<![\w-])" + re.escape(clean_doc_id) + r"(?![\w-])", source_text, re.I):
+            clean_doc_id = None
+        sub_rules = [rule for rule in raw.sub_rules if rule.strip() and rule.casefold() in source_text.casefold()]
         item = RequirementItem(
             model_reviewed=True,
             report_id="TEMP",
             doc_id=clean_doc_id,
             category=raw.category,
-            title=raw.title.strip(),
+            title=title,
             is_compound=raw.is_compound,
-            sub_rules=raw.sub_rules,
+            sub_rules=sub_rules,
             source=verified_span,
         )
         merged.append(item)
@@ -370,6 +385,7 @@ def run_audit_pipeline(
                 problem=raw_sd.problem.strip(),
                 impact=raw_sd.reported_impact(),
                 question_for_analyst=raw_sd.question_for_analyst.strip(),
+                decision=raw_sd.decision if raw_sd.criterion in ("CONSISTENT", "VERIFIABLE_SET") else None,
                 recommendation=(
                     "Уточнить у владельца документа: " + raw_sd.question_for_analyst.strip()
                     if raw_sd.criterion == "COMPLETE_SET"
@@ -401,6 +417,8 @@ def run_audit_pipeline(
         analysis_status = "insufficient_input"
     elif analysis_status == "complete" and any(not r.model_reviewed for r in requirements):
         analysis_status = "coverage_incomplete"
+    elif analysis_status == "complete" and doc.unreadable_pages:
+        analysis_status = "partial_document"
 
     duration = round(time.perf_counter() - t0, 2)
     passport = RunPassport(
@@ -411,6 +429,7 @@ def run_audit_pipeline(
         analysis_status=analysis_status,
         total_lines=doc.total_lines,
         total_pages=doc.total_pages,
+        unreadable_pages=doc.unreadable_pages,
         run_timestamp=datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z"),
         provider=provider_label,
         model_name=model_label,
@@ -418,6 +437,7 @@ def run_audit_pipeline(
         duration_sec=duration,
         llm_calls_count=llm_client.calls_count,
         http_attempt_models=llm_client.http_models,
+        token_usage=llm_client.token_usage,
     )
 
     return build_verified_audit_report(

@@ -256,7 +256,7 @@ def test_parse_real_generated_pdf_with_tables_and_headings(tmp_path: Path) -> No
     assert "типов данных" in titles
     assert "200 OK с ERROR vs 400" in titles
     assert any(ad.criterion == "SINGULAR" and ad.doc_id == "Ф-2" for ad in scan.atomic_defects)
-    assert any(ad.criterion == "VERIFIABLE" for ad in scan.atomic_defects)
+    assert not any(ad.criterion == "VERIFIABLE" and "в течение минуты" in ad.evidence[0].quote for ad in scan.atomic_defects)
 
 
 def test_parse_empty_text_pdf_raises_clear_error(tmp_path: Path) -> None:
