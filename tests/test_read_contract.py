@@ -18,7 +18,8 @@ PAIR = ROOT / "eval" / "e6" / "reminder_no_read.md"
 def test_set_prompt_separates_read_obligation_by_described_behaviour():
     prompt = build_pass2_set_prompt("[L001] x", "- REQ-01")
     assert "по описанной логике и ответу, а не по названию, описанию или HTTP-методу" in prompt
-    assert "не утверждай, что такой операции нет в системе" in prompt
+    assert "Не утверждай, что операция отсутствует в системе" in prompt
+    assert "не называй метод, HTTP-глагол, эндпоинт или маршрут" in prompt
     assert "уже возвращают действующее значение" in prompt
 
 
