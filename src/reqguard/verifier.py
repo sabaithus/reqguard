@@ -183,6 +183,15 @@ def _deduplicate_atomic(defects: list[AtomicDefect]) -> list[AtomicDefect]:
     return kept
 
 
+def _same_branch(a: str, b: str) -> bool:
+    return a == b or a.startswith(b + " → ") or b.startswith(a + " → ")
+
+
+def _sections_related(a: set[str], b: set[str]) -> bool:
+    """Одна сторона целиком лежит в разделах другой с учётом вложенности подразделов."""
+    return all(any(_same_branch(x, y) for y in b) for x in a) or all(any(_same_branch(y, x) for x in a) for y in b)
+
+
 def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
     kept: list[SetDefect] = []
     # Сначала пропускаем STRUCTURAL, затем LLM, чтобы составной LLM-дефект корректно сливался с точечными структурными
@@ -233,7 +242,7 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
 
             ex_secs = {sp.section_path for sp in ex.evidence if sp.section_path}
             cand_secs = {sp.section_path for sp in cand.evidence if sp.section_path}
-            if ex_secs and cand_secs and not (ex_secs <= cand_secs or cand_secs <= ex_secs) and sim < 0.55:
+            if ex_secs and cand_secs and not _sections_related(ex_secs, cand_secs) and sim < 0.55:
                 continue
 
             # Если оба дефекта ссылаются на одни и те же строки и описывают одну проблему
