@@ -69,5 +69,9 @@ def test_units_and_source_findings_on_shared_data_line_stay_apart():
     settings = LLMSettings(provider="gemini", api_key="test", primary_model="mock", max_retries=1)
     with patch.object(ResilientLLMClient, "_call_provider", side_effect=list(map(json.dumps, replies))):
         report = run_audit_pipeline(GAP, settings)
-    titles = {d.title for d in report.set_defects}
-    assert units["title"] in titles and source["title"] in titles
+    # Находка модели об источнике сливается с одноимённой находкой сканера (HYBRID); единицы остаются отдельно.
+    units_kept = [d for d in report.set_defects if d.title == units["title"]]
+    source_kept = [d for d in report.set_defects if "адрес" in d.title]
+    assert len(units_kept) == 1 and len(source_kept) == 1
+    assert source_kept[0].origin == "HYBRID"
+    assert step.line_no not in {e.line_start for e in units_kept[0].evidence}

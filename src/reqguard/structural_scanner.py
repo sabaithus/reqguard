@@ -383,6 +383,60 @@ def _check_notification_limit(doc: ParsedDocument) -> list[SetDefect]:
     return findings
 
 
+# «Отправить/отправляет» описывает действие (уведомление, сообщение), а не поле данных, — не учитывается.
+_PASS_VERB = re.compile(r"\b(?:передать|переда[её]т)\s+([^.;:]+)", re.I)
+_FIELD_TAIL = re.compile(r"\s+(?:при|если|когда|после|для|по|в течение|через)\s.*$", re.I)
+_WORD = re.compile(r"[а-яёa-z0-9]+", re.I)
+
+
+def _content_stems(phrase: str) -> list[str]:
+    words = [w.lower().replace("ё", "е") for w in _WORD.findall(phrase)]
+    return [w[: max(4, len(w) - 2)] for w in words if len(w) >= 4]
+
+
+def _split_fields(phrase: str) -> list[str]:
+    phrase = _FIELD_TAIL.sub("", phrase.strip())
+    return [p.strip() for p in re.split(r",|\s+и\s+", phrase) if p.strip()]
+
+
+def _check_passed_value_sources(doc: ParsedDocument) -> list[SetDefect]:
+    """Поле сообщения из последовательности без описанного источника: хранения, события или получения."""
+    content = [dl for dl in doc.lines if dl.kind in ("text", "list_item")]
+    steps = [dl for dl in content if re.search(r"sequence|последовательност", dl.section_path, re.I)]
+    data_lines = [dl for dl in content if "требования к данным" in dl.section_path.lower()]
+    sources = [dl.raw_text for dl in content if re.search(r"требования к (?:данным|интеграции)", dl.section_path, re.I)]
+    # Остальные сообщения последовательности (входящие события, получение) тоже описывают данные.
+    for dl in steps:
+        sources.extend(c for c in re.split(r"(?<=[.;])\s+", dl.raw_text) if not _PASS_VERB.search(c))
+    source_words = [{w.lower().replace("ё", "е") for w in _WORD.findall(text)} for text in sources]
+
+    def described(field: str) -> bool:
+        stems = _content_stems(field)
+        return bool(stems) and any(all(any(w.startswith(s) for w in words) for s in stems) for words in source_words)
+
+    findings: list[SetDefect] = []
+    seen: set[str] = set()
+    for dl in steps:
+        for match in _PASS_VERB.finditer(dl.raw_text):
+            for field in _split_fields(match.group(1)):
+                key = field.lower()
+                if key in seen or not _content_stems(field) or described(field):
+                    continue
+                seen.add(key)
+                evidence = [_make_span(dl)] + ([_make_span(data_lines[0])] if data_lines else [])
+                findings.append(SetDefect(
+                    defect_id="passed-value-source", related_req_ids=[], criterion="COMPLETE_SET", severity="MAJOR",
+                    title=f"В переданной спецификации не описан источник значения «{field}»",
+                    problem=(f"Шаг последовательности передаёт значение «{field}». Требования к данным и интеграции "
+                             "не называют его хранимым полем, данными входящего события или результатом получения."),
+                    impact=f"По документу нельзя решить, откуда шаг берёт значение «{field}» и как проверить его в тестах.",
+                    question_for_analyst=f"Откуда берётся значение «{field}», которое передаётся на этом шаге?",
+                    recommendation="Указать источник значения: хранимое поле, данные события или описанное получение.",
+                    evidence=evidence, origin="STRUCTURAL",
+                ))
+    return findings
+
+
 def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
     """Выполняет детерминированные статические проверки документа."""
     baseline_reqs = extract_baseline_requirements(doc)
@@ -561,6 +615,7 @@ def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
 
     set_defects.extend(_check_accounting_month(doc))
     set_defects.extend(_check_notification_limit(doc))
+    set_defects.extend(_check_passed_value_sources(doc))
 
     # 4. Статический анализ контрактов REST API
     _scan_rest_api_contracts(doc, set_defects, next_sid)
