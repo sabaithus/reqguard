@@ -314,6 +314,16 @@ def _cross_deduplicate_atomic_vs_set(
     return kept
 
 
+def _enumerated_items(text: str) -> int:
+    """Считает пункты вида «1) …», не считая закрывающую скобку ранее открытой «(»."""
+    count = 0
+    for m in re.finditer(r"(?:^|\s)\d+\)\s", text):
+        close = m.end() - 2
+        if text.count("(", 0, close) <= text.count(")", 0, close):
+            count += 1
+    return count
+
+
 def build_verified_audit_report(
     doc: ParsedDocument,
     passport: RunPassport,
@@ -374,7 +384,7 @@ def build_verified_audit_report(
         incomplete = sd.origin == "LLM" and (
             rejected > 0 or (sd.criterion in ("CONSISTENT", "VERIFIABLE_SET") and len(valid_spans) < 2)
         )
-        bundled = sd.origin == "LLM" and len(re.findall(r"(?:^|\s)\d+\)\s", sd.problem)) > 1
+        bundled = sd.origin == "LLM" and _enumerated_items(sd.problem) > 1
         if not valid_spans or incomplete or bundled:
             filtered_hallucinations += 1
             continue
