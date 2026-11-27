@@ -336,7 +336,10 @@ def build_verified_audit_report(
         claim = issue.problem.casefold()
         if issue.criterion == "VERIFIABLE" and re.search(r"перцентил|p9[059]|профил.{0,4} нагрузк|\brps\b", claim):
             issue.severity = "MAJOR"
-        if has_operation_id and re.search(r"(?:не (?:задан|определ|указан)|нет|отсутств)[^.!?]{0,60}(?:ключ|идентификатор)[^.!?]{0,30}идемпотент", claim):
+        missing = r"(?:не (?:задан|определ|указан)|нет|отсутств)"
+        missing_key = re.search(missing + r"[^.!?]{0,60}(?:ключ|идентификатор)[^.!?]{0,30}идемпотент", claim)
+        missing_mechanism = re.search(missing + r"\w*\s+механизм[^.!?]{0,40}идемпотент[^.!?]{0,65}(?:ключ|transaction_id)", claim)
+        if has_operation_id and (missing_key or missing_mechanism):
             issue.severity = "MAJOR"
 
     verified_atomic: list[AtomicDefect] = []
