@@ -445,12 +445,37 @@ def _check_read_before_write(doc: ParsedDocument) -> list[SetDefect]:
     )]
 
 
+def _tabular_source_values(table: ParsedTable) -> list[str]:
+    """Read declared field/output cells, keeping input columns and other rows separate."""
+    section = table.section_path.casefold()
+    if re.search(r"требования к данным|(?:^|→\s*)(?:ответ|response)\b", section):
+        columns = {"поле", "атрибут", "параметр", "parameter", "field", "описание", "description"}
+    elif "интеграц" in section:
+        columns = {"выход", "ответ", "результат", "выходные данные", "output", "response"}
+    else:
+        return []
+    headers = [h.strip("*` ").casefold() for h in table.headers]
+    selected = [i for i, h in enumerate(headers) if h in columns]
+    values = []
+    for row in table.rows:
+        for_header = dict(zip(headers, row.cells))
+        source = for_header.get("источник", for_header.get("source"))
+        if source is not None and re.fullmatch(
+            r"(?:[-—–?]|tbd|не\s+(?:определ[её]н|указан|известен)|нет)?", source.strip(), re.I
+        ):
+            continue
+        values.extend(row.cells[i] for i in selected if i < len(row.cells))
+    return values
+
+
 def _check_passed_value_sources(doc: ParsedDocument) -> list[SetDefect]:
     """Поле сообщения из последовательности без описанного источника: хранения, события или получения."""
     content = [dl for dl in doc.lines if dl.kind in ("text", "list_item")]
     steps = [dl for dl in content if re.search(r"sequence|последовательност", dl.section_path, re.I)]
     data_lines = [dl for dl in content if "требования к данным" in dl.section_path.lower()]
     sources = [dl.raw_text for dl in content if re.search(r"требования к (?:данным|интеграции)", dl.section_path, re.I)]
+    for table in doc.tables:
+        sources.extend(_tabular_source_values(table))
     # Остальные сообщения последовательности (входящие события, получение) тоже описывают данные.
     for dl in steps:
         sources.extend(c for c in re.split(r"(?<=[.;])\s+", dl.raw_text) if not _PASS_VERB.search(c))

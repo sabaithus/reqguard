@@ -62,3 +62,18 @@ def test_field_carried_by_an_incoming_event_has_a_source(tmp_path):
 def test_field_absent_everywhere_is_reported_in_a_minimal_document(tmp_path):
     _, found = _source_findings(_doc(tmp_path, "Сервис заказов → склад: передать номер ячейки и сумму заказа."))
     assert [d.title for d in found] == ["В переданной спецификации не описан источник значения «номер ячейки»"]
+
+
+@pytest.mark.parametrize(("section", "table", "missing"), [
+    ("Требования к данным", "| Поле | Тип |\n|---|---|\n| Номер ячейки | string |", False),
+    ("Требования к интеграции", "| Сервис | Вход | Выход |\n|---|---|---|\n| Склад | ID | Номер ячейки |", False),
+    ("Требования к интеграции", "| Сервис | Вход | Выход |\n|---|---|---|\n| Склад | Номер ячейки | ID |", True),
+    ("Ответ API", "| Parameter | Описание |\n|---|---|\n| cell | Номер ячейки |", False),
+    ("Требования к данным", "| Поле | Источник |\n|---|---|\n| Номер ячейки | Не определён |", True),
+])
+def test_source_table_direction(tmp_path, section, table, missing):
+    path = _doc(tmp_path, "Сервис заказов → склад: передать номер ячейки.")
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(f"\n### {section}\n{table}\n")
+    _, findings = _source_findings(path)
+    assert bool(findings) == missing
