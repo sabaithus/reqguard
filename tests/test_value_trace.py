@@ -26,6 +26,9 @@ def test_set_prompt_traces_source_of_passed_value():
     assert "передаёт, отправляет, показывает или использует" in prompt
     assert "хранимое поле, данные входящего события или описанное получение" in prompt
     assert "Не утверждай, что значение недоступно" in prompt
+    # Описанное получение в любом разделе снимает находку (ложная находка на described, 28909b7).
+    assert "возвращается другой системой; тогда записи нет" in prompt
+    assert "impact называй решением, которое нельзя принять по документу. Не утверждай" in prompt
 
 
 def test_prompts_carry_no_case_or_pair_terms():
