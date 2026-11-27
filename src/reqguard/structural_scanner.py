@@ -399,6 +399,52 @@ def _split_fields(phrase: str) -> list[str]:
     return [p.strip() for p in re.split(r",|\s+и\s+", phrase) if p.strip()]
 
 
+_READ_WRITE_DUTY = re.compile(
+    r"\b(?:читает|получает|загружает)\s+и\s+(?:сохраняет|изменяет|обновляет)\s+"
+    r"(?P<value>[\w -]+?)\s+(?:через|по)\s+[^.;\n]*\bAPI\b", re.I,
+)
+_WRITE_STEP = re.compile(r"^\s*(?:\d+[.)]|[-*•])?\s*(?:записать|сохранить|заменить|обновить)\s+", re.I)
+
+
+def _check_read_before_write(doc: ParsedDocument) -> list[SetDefect]:
+    """Check an explicit dual obligation against a single documented write operation."""
+    duties = [(line, match) for line in doc.lines if "интеграц" in line.section_path.lower()
+              if (match := _READ_WRITE_DUTY.search(line.raw_text))]
+    if len(duties) != 1:
+        return []
+    duty, match = duties[0]
+    contract = [line for line in doc.lines if re.search(r"\bAPI\b", line.section_path, re.I)]
+    operations = [line for line in contract if re.search(r"^\|\s*\**REST type\**\s*\|", line.raw_text, re.I)]
+    if len(operations) != 1:
+        return []
+    steps = [line for line in contract if "логика" in line.section_path.lower()]
+    writes = [line for line in steps if _WRITE_STEP.search(line.raw_text)]
+    if not writes:
+        return []
+    # A read branch may share a URL with the write. A rollback response on an
+    # invalid write is not a successful read of the current state.
+    for line in contract:
+        if line.kind == "heading" or line in writes or re.search(r"отклон|ошибк|невалид", line.raw_text, re.I):
+            continue
+        if re.search(r"без (?:изменени|записи)|прочитать|"
+                     r"(?:вернуть|возвращает|получить)\s+(?:текущ|сохран[её]нн|действующ)", line.raw_text, re.I):
+            return []
+    value = match["value"].strip()
+    description = next((line for line in contract
+                        if re.search(r"^\|\s*\**Description\**\s*\|", line.raw_text, re.I)), None)
+    evidence = [duty, description or operations[0], writes[0]]
+    return [SetDefect(
+        defect_id="read-before-write", related_req_ids=[], criterion="COMPLETE_SET", severity="MAJOR",
+        title=f"Получение до изменения: «{value}»",
+        problem=f"Интеграция требует читать и изменять «{value}». Приведённый шаг описывает запись. "
+                "Как выполнить первоначальное чтение по этому описанию, требует уточнения.",
+        impact="Для первого открытия нельзя составить проверку получения значения без его изменения.",
+        question_for_analyst=f"Как клиент получает «{value}» до первой записи?",
+        recommendation="Указать поведение при получении действующего значения и ожидаемый ответ.",
+        evidence=[_make_span(line) for line in evidence], origin="STRUCTURAL",
+    )]
+
+
 def _check_passed_value_sources(doc: ParsedDocument) -> list[SetDefect]:
     """Поле сообщения из последовательности без описанного источника: хранения, события или получения."""
     content = [dl for dl in doc.lines if dl.kind in ("text", "list_item")]
@@ -616,6 +662,7 @@ def run_structural_scan(doc: ParsedDocument) -> StructuralScanResult:
     set_defects.extend(_check_accounting_month(doc))
     set_defects.extend(_check_notification_limit(doc))
     set_defects.extend(_check_passed_value_sources(doc))
+    set_defects.extend(_check_read_before_write(doc))
 
     # 4. Статический анализ контрактов REST API
     _scan_rest_api_contracts(doc, set_defects, next_sid)

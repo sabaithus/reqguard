@@ -15,6 +15,28 @@ ROOT = Path(__file__).resolve().parents[1]
 PAIR = ROOT / "eval" / "e6" / "reminder_no_read.md"
 
 
+def read_questions(path):
+    return [d for d in run_structural_scan(parse_document(path)).set_defects
+            if d.defect_id == "read-before-write"]
+
+
+def test_read_obligation_does_not_depend_on_model_or_http_verb():
+    missing, = read_questions(PAIR)
+    assert "интервал" in missing.question_for_analyst
+    assert len(missing.evidence) >= 2
+    assert not read_questions(PAIR.with_name("reminder_with_read.md"))
+    bank, = read_questions(ROOT / "docs" / "requirements.pdf")
+    assert "настройки" in bank.question_for_analyst
+
+
+def test_read_can_use_same_operation_without_writing(tmp_path):
+    path = tmp_path / "conditional.md"
+    path.write_text(PAIR.read_text(encoding="utf-8").replace(
+        "4. Записать новый интервал", "4. Если новое значение не передано, вернуть текущий интервал без изменения.\n5. Записать новый интервал"
+    ), encoding="utf-8")
+    assert not read_questions(path)
+
+
 def test_set_prompt_separates_read_obligation_by_described_behaviour():
     prompt = build_pass2_set_prompt("[L001] x", "- REQ-01")
     assert "по описанной логике и ответу, а не по названию, описанию или HTTP-методу" in prompt

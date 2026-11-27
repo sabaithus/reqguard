@@ -409,7 +409,18 @@ def build_verified_audit_report(
         verified_set.append(sd)
 
     # Дедупликация: сначала Set, затем кросс-дедупликация Atomic ↔ Set и сортировка по критичности
-    dedup_set = _deduplicate_set(verified_set)
+    # Preserve a more specific verified model finding when available. Apply
+    # the narrow read-before-write fallback only after normal deduplication.
+    dedup_set = _deduplicate_set([sd for sd in verified_set if sd.defect_id != "read-before-write"])
+    for fallback in (sd for sd in verified_set if sd.defect_id == "read-before-write"):
+        covered = any(
+            item.criterion == "COMPLETE_SET"
+            and re.search(r"\b(?:получени|чтени|загрузк)", item.title, re.I)
+            and _spans_overlap(item.evidence, fallback.evidence)
+            for item in dedup_set
+        )
+        if not covered:
+            dedup_set.append(fallback)
     dedup_atomic = _cross_deduplicate_atomic_vs_set(
         _deduplicate_atomic(verified_atomic),
         dedup_set,
