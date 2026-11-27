@@ -372,6 +372,23 @@ def _check_calculation_question(issue: AtomicDefect, document_words: set[str]) -
         issue.impact = risk.strip()
 
 
+_NUMBER_RE = re.compile(r"(?<![\w.,-])\d[\d  ]*(?:[.,]\d+)?")
+
+
+def _numbers_in(text: str) -> set[str]:
+    return {re.sub(r"[  ]", "", m.group()).replace(",", ".").rstrip(".") for m in _NUMBER_RE.finditer(text)}
+
+
+def _document_numbers(lines: list[str]) -> set[str]:
+    return set().union(*(_numbers_in(line) for line in lines)) if lines else set()
+
+
+def _drop_invented_fix(issue: AtomicDefect, document_numbers: set[str]) -> None:
+    """Исправление с числом, которого нет в документе, навязывает ответ владельцу — не показываем его."""
+    if issue.suggested_fix and _numbers_in(issue.suggested_fix) - document_numbers:
+        issue.suggested_fix = None
+
+
 def build_verified_audit_report(
     doc: ParsedDocument,
     passport: RunPassport,
@@ -459,6 +476,10 @@ def build_verified_audit_report(
         _deduplicate_atomic(verified_atomic),
         dedup_set,
     )
+
+    document_numbers = _document_numbers([line.raw_text for line in doc.lines])
+    for ad in dedup_atomic:
+        _drop_invented_fix(ad, document_numbers)
 
     dedup_atomic.sort(key=lambda d: (SEVERITY_RANK[d.severity], d.evidence[0].line_start))
     for i, ad in enumerate(dedup_atomic, start=1):
