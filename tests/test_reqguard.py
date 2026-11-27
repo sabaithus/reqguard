@@ -254,7 +254,7 @@ def test_parse_real_generated_pdf_with_tables_and_headings(tmp_path: Path) -> No
     assert "HTTP GET" in titles
     assert "Да / Нет" in titles
     assert "типов данных" in titles
-    assert "200 OK с ERROR vs 400" in titles
+    assert "секция 200 содержит ответ ERROR, а для ошибок описан статус 400" in titles
     assert any(ad.criterion == "SINGULAR" and ad.doc_id == "Ф-2" for ad in scan.atomic_defects)
     assert not any(ad.criterion == "VERIFIABLE" and "в течение минуты" in ad.evidence[0].quote for ad in scan.atomic_defects)
 
@@ -650,7 +650,7 @@ def test_cli_structural_run_on_official_case_md_and_pdf(tmp_path: Path) -> None:
     assert "HTTP GET" in pdf_report
     assert "типов данных" in pdf_report
     assert "Да / Нет" in pdf_report
-    assert "200 OK с ERROR vs 400" in pdf_report
+    assert "секция 200 содержит ответ ERROR, а для ошибок описан статус 400" in pdf_report
 
 
 def test_deduplicator_merges_overlapping_200_400_status_defects(tmp_path: Path) -> None:
