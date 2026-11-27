@@ -32,7 +32,7 @@ PLACEHOLDER_TEXT_RE = re.compile(
 )
 MUTATING_KEYWORDS_RE = re.compile(
     r"(?:сохранен|сохранить|изменен|изменить|создан|создать|удален|удалить|заменить|обновлен|обновить|"
-    r"save|create|update|delete|setlimit|savelimit|upsert|patch)",
+    r"save|create|update|delete|upsert|patch|(?-i:\bset[A-Z]|(?<=[a-z/_])set[A-Z]))",
     re.IGNORECASE,
 )
 HTTP_STATUS_HEADING_RE = re.compile(r"^(?:#{1,6}\s*)?(\d{3})\.\s*(.+)$")

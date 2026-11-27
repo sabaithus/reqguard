@@ -283,7 +283,7 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
 
 
 _TOPIC_SIGNATURES: tuple[tuple[str, ...], ...] = (
-    ("get", "мутир", "savelimit", "post", "put"),
+    ("get", "мутир", "save", "post", "put"),
     ("200", "error", "400", "статус"),
     ("возврат", "минус", "отрицательн", "прошл"),
     ("момент", "покупк", "клиринг", "авторизац", "проведен"),
