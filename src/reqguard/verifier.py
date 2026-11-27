@@ -238,6 +238,7 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
 
             ex_tokens = _tokens(f"{ex.title} {ex.problem} {ex.recommendation}")
             overlap = _spans_overlap(ex.evidence, cand.evidence)
+            shared_req = bool(set(ex.related_req_ids) & set(cand.related_req_ids))
             sim = _jaccard(cand_tokens, ex_tokens)
 
             ex_secs = {sp.section_path for sp in ex.evidence if sp.section_path}
@@ -250,6 +251,8 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
                 (overlap and sim >= 0.30)
                 or (overlap and ex.criterion == cand.criterion and sim >= 0.26)
                 or (overlap and _same_topic_pair(cand_tokens, ex_tokens))
+                or (not overlap and shared_req and ex.criterion == cand.criterion
+                    and _same_topic_pair(cand_tokens, ex_tokens))
                 or sim >= 0.50
             ):
                 if SEVERITY_RANK[cand.severity] < SEVERITY_RANK[ex.severity]:
