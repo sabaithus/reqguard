@@ -121,8 +121,17 @@ def render_html_report(report: AuditReport) -> str:
     fixes_li = "".join(f"<li>{html.escape(f)}</li>" for f in s.priority_fixes)
     questions = []
     for question, issues in report.owner_questions():
-        links = ", ".join(f'<a href="#{html.escape(d.defect_id)}">{html.escape(d.defect_id)}</a>' for d in issues)
-        questions.append(f"<li>{html.escape(question)} · {links}</li>")
+        details = []
+        for issue in issues:
+            ref = html.escape(issue.defect_id)
+            details.append(f'<p><a href="#{ref}">{ref}</a> · {issue.severity}</p>')
+            for span in issue.evidence:
+                details.append(f"<blockquote>{html.escape(span.quote)}<br><small>{html.escape(span.format_locator())}</small></blockquote>")
+            decision = getattr(issue, "decision", None)
+            if decision:
+                options = "".join(f"<li>{html.escape(option)}</li>" for option in decision.alternatives)
+                details.append(f"<ol>{options}</ol><p>Проверка QA: {html.escape(decision.acceptance_check)}</p>")
+        questions.append(f"<li><details><summary>{html.escape(question)}</summary>{''.join(details)}</details></li>")
     export_button = '<button class="filter-btn" onclick="exportDecisions()">Скачать протокол решений (JSON)</button>' if any(d.decision for d in report.set_defects) else ""
 
     history = []
