@@ -340,6 +340,38 @@ def _enumerated_items(text: str) -> int:
     return count
 
 
+def _check_calculation_question(issue: AtomicDefect, document_words: set[str]) -> None:
+    """Screen a proposed recalculation of a different, uncited document entity."""
+    if issue.origin != "LLM" or issue.criterion != "COMPLETE" or not issue.suggested_fix:
+        return
+    question = re.search(r"\bпересчи(?:тывать|тать)\s+([а-яё]{4,})\b", issue.suggested_fix, re.I)
+    risk, _, decision = issue.impact.partition("Блокируемое решение:")
+    rationale = re.search(r"\bперерасч[её]т[а-я]*\s+([а-яё]{4,})\b", decision or risk, re.I)
+    if not question or not rationale:
+        return
+    cited = _tokens(" ".join(span.quote for span in issue.evidence))
+    # Require positive evidence for the quantity in the rationale and for a
+    # different term elsewhere in the document. Abstain on unknown vocabulary.
+    def stem(word: str) -> str:
+        base = re.sub(r"(?:ами|ями|ов|ев|ам|ям|ах|ях|ы|и|а|у|е|ю)$", "", word.casefold().replace("ё", "е"))
+        return re.sub(r"(?<=[бвгджзклмнпрстфхцчшщ])[ое]к$", "к", base)
+
+    quantity = stem(question[1])
+    original = stem(rationale[1])
+    cited_stems = {stem(word) for word in cited}
+    if original not in cited_stems or quantity in cited_stems or quantity == original:
+        return
+    if not any(stem(word) == quantity for word in document_words):
+        return
+    issue.suggested_fix = None
+    # The label alone does not establish an observable blocked outcome.
+    if (issue.severity == "CRITICAL" and re.fullmatch(
+        r"\s*(?:алгоритм|механизм|порядок)\s+перерасч[её]та\s+[^?!:;]+", decision, re.I
+    ) and not re.search(r"\b(?:или|либо|ли)\b", decision, re.I)):
+        issue.severity = "MAJOR"
+        issue.impact = risk.strip()
+
+
 def build_verified_audit_report(
     doc: ParsedDocument,
     passport: RunPassport,
@@ -369,6 +401,7 @@ def build_verified_audit_report(
             issue.severity = "MAJOR"
 
     verified_atomic: list[AtomicDefect] = []
+    document_words = _tokens("\n".join(line.raw_text for line in doc.lines))
     for ad in candidate_atomic:
         valid_spans: list[SourceSpan] = []
         for sp in ad.evidence:
@@ -381,6 +414,7 @@ def build_verified_audit_report(
             filtered_hallucinations += 1
             continue
         ad.evidence = valid_spans
+        _check_calculation_question(ad, document_words)
         calibrate(ad)
         verified_atomic.append(ad)
 
