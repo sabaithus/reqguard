@@ -192,6 +192,18 @@ def _sections_related(a: set[str], b: set[str]) -> bool:
     return all(any(_same_branch(x, y) for y in b) for x in a) or all(any(_same_branch(y, x) for x in a) for y in b)
 
 
+def _claim_kinds_differ(a: SetDefect, b: SetDefect) -> bool:
+    """Одна находка утверждает пропуск (COMPLETE_SET), другая — дефект описанного содержимого.
+
+    Это разные утверждения даже при общей строке и общей теме: их сливает только сильное
+    совпадение текста.
+    """
+    return (a.criterion == "COMPLETE_SET") != (b.criterion == "COMPLETE_SET")
+
+
+_CROSS_KIND_MIN_SIM = 0.50
+
+
 def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
     kept: list[SetDefect] = []
     # Сначала пропускаем STRUCTURAL, затем LLM, чтобы составной LLM-дефект корректно сливался с точечными структурными
@@ -202,15 +214,12 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
 
         # Проверка покрытия составного LLM-дефекта несколькими уже существующими STRUCTURAL-дефектами
         if cand.origin == "LLM" and cand_lines:
-            cand_title_low = cand.title.lower()
-            cand_is_missing_read = "чтен" in cand_title_low and not ("мутир" in cand_title_low)
             covering_structural: list[SetDefect] = []
             covered_lines_union: set[int] = set()
             for ex in kept:
                 if ex.origin not in ("STRUCTURAL", "HYBRID"):
                     continue
-                ex_title_low = ex.title.lower()
-                if ("http get" in ex_title_low or "мутирующ" in ex_title_low) and cand_is_missing_read:
+                if _claim_kinds_differ(ex, cand):
                     continue
                 ex_lines = {ln for sp in ex.evidence for ln in range(sp.line_start, sp.line_end + 1)}
                 overlap_lines = cand_lines & ex_lines
@@ -228,18 +237,13 @@ def _deduplicate_set(defects: list[SetDefect]) -> list[SetDefect]:
 
         merged = False
         for ex in kept:
-            ex_title_low = ex.title.lower()
-            cand_title_low = cand.title.lower()
-            # Не сливаем дефект про мутирующий HTTP GET с дефектом про отсутствие отдельного GET-метода чтения
-            ex_is_mutating_get = "http get" in ex_title_low or "мутирующ" in ex_title_low
-            cand_is_missing_read = "чтен" in cand_title_low and not ("мутир" in cand_title_low)
-            if ex_is_mutating_get and cand_is_missing_read:
-                continue
-
             ex_tokens = _tokens(f"{ex.title} {ex.problem} {ex.recommendation}")
             overlap = _spans_overlap(ex.evidence, cand.evidence)
             shared_req = bool(set(ex.related_req_ids) & set(cand.related_req_ids))
             sim = _jaccard(cand_tokens, ex_tokens)
+
+            if _claim_kinds_differ(ex, cand) and sim < _CROSS_KIND_MIN_SIM:
+                continue
 
             ex_secs = {sp.section_path for sp in ex.evidence if sp.section_path}
             cand_secs = {sp.section_path for sp in cand.evidence if sp.section_path}

@@ -379,10 +379,11 @@ def test_deduplicator_keeps_mutating_get_separate_from_missing_read_endpoint(tmp
     line_desc = next(dl.line_no for dl in doc.lines if "**Description**" in dl.raw_text)
     line_get = next(dl.line_no for dl in doc.lines if "**REST type**" in dl.raw_text)
 
+    # Пропуск описанного чтения — утверждение о полноте (COMPLETE_SET), как его выдаёт промпт фазы 2 после E6.
     missing_read_llm = SetDefect(
         defect_id="DEF-S88",
         related_req_ids=["REQ-15"],
-        criterion="INTERFACE_INTEGRITY",
+        criterion="COMPLETE_SET",
         severity="CRITICAL",
         title="Отсутствие REST API метода для чтения настроек порога и расходов",
         problem="В Description указано чтение порога, но в API описан только saveLimit через GET.",
