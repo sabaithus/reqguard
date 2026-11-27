@@ -31,3 +31,9 @@ A4. Воспроизведён ложный CRITICAL на формулировк
 ### Возобновление с A3
 
 На машине с сетью проверить полный pytest и push ветки и обоих тегов. Для точного воспроизведения открыть чистый checkout тега v1.4.0-submission-rc2, настроить локальный .env, запустить prepare_submission.py docs/requirements.pdf output/submission_908ed8d. Проверить в паспорте версию, complete, количество ответов и SHA-256. Сверить E1–E12 с цитатами вручную, особенно E2; совпадения цитат в скорере не гарантируют правильность вывода. Из этого же JSON пересобрать презентацию, сохранить три формата отчёта в examples и снять экран со Studio. До этого финальный комплект 5A не подтверждён.
+
+## Отдельная проверка A1 · 27.11.2026
+
+До проверки рабочее дерево чистое, HEAD 5c67bf9. compare_runs.py отслеживается, проверка связности Git прошла. GitHub API независимо вернул для main коммит 8d48b6a4553dcccb43bef0d8a565ca6a8fe47f9e. Оба локальных тега через API не разрешаются (422 No commit found). v1.4.0-submission указывает на b65e376, v1.4.0-submission-rc2 на проверенное исправление 908ed8d. История продолжается журналом. Git HTTPS не смог разрешить github.com, запись через установленную интеграцию отклонена с 403 Resource not accessible by integration.
+
+Следующий шаг исключительно A1: git push --atomic origin main refs/tags/v1.4.0-submission refs/tags/v1.4.0-submission-rc2. Затем сверить git ls-remote --refs origin refs/heads/main refs/tags/v1.4.0-submission refs/tags/v1.4.0-submission-rc2 с git rev-parse HEAD refs/tags/v1.4.0-submission refs/tags/v1.4.0-submission-rc2. До совпадения всех трёх значений A1 открыт. Существующие теги не перемещать.
