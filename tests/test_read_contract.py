@@ -20,6 +20,8 @@ def test_set_prompt_separates_read_obligation_by_described_behaviour():
     assert "по описанной логике и ответу, а не по названию, описанию или HTTP-методу" in prompt
     assert "не утверждай, что операция отсутствует в системе" in prompt
     assert "Вопросы других записей формулируй по их собственному предмету" in prompt
+    assert "назови в нём само значение словами документа" in prompt
+    assert "этого значения" not in prompt
     assert "не называй метод, HTTP-глагол, эндпоинт или маршрут" in prompt
     assert "уже возвращают действующее значение" in prompt
 
