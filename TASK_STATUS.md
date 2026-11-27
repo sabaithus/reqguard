@@ -37,3 +37,15 @@ A4. Воспроизведён ложный CRITICAL на формулировк
 До проверки рабочее дерево чистое, HEAD 5c67bf9. compare_runs.py отслеживается, проверка связности Git прошла. GitHub API независимо вернул для main коммит 8d48b6a4553dcccb43bef0d8a565ca6a8fe47f9e. Оба локальных тега через API не разрешаются (422 No commit found). v1.4.0-submission указывает на b65e376, v1.4.0-submission-rc2 на проверенное исправление 908ed8d. История продолжается журналом. Git HTTPS не смог разрешить github.com, запись через установленную интеграцию отклонена с 403 Resource not accessible by integration.
 
 Следующий шаг исключительно A1: git push --atomic origin main refs/tags/v1.4.0-submission refs/tags/v1.4.0-submission-rc2. Затем сверить git ls-remote --refs origin refs/heads/main refs/tags/v1.4.0-submission refs/tags/v1.4.0-submission-rc2 с git rev-parse HEAD refs/tags/v1.4.0-submission refs/tags/v1.4.0-submission-rc2. До совпадения всех трёх значений A1 открыт. Существующие теги не перемещать.
+## A2 — проверка чистого клона, 27.11.2026
+
+A1 закрыт по выводу пользовательского PowerShell. Атомарный push опубликовал main на 08f9956 и оба тега. Сверка трёх удалённых refs с локальными SHA завершилась без исключения. Ctrl+C прервал только последующую печать сообщения.
+
+A2 открыт по одному критерию — полный отчёт из чистого клона через провайдера. На старте рабочее дерево 08f9956 было чистым. Оба документа отслеживаются. SHA-256 совпал попарно для PDF с submission_ready/requirements.pdf и для MD с _official_task/docs/requirements.md. В основной команде README обнаружено расхождение каталога результата с A2. Исправлен путь на reports/report.md, добавлено исключение для генерируемого корневого каталога reports.
+
+Проверка в новом каталоге output/a2_08f9956. git clone --no-local с локального пути упал при запуске Git sh (0xC0000022), поэтому клонировали ветку main из свежего Git bundle, проверили чистый статус и создали новую .venv. pip install -r requirements.txt использовал локальные колёса, pip check вывел «No broken requirements found.» Доступ к PyPI этим запуском не проверялся.
+
+Команда обновлённого README в клоне с локальным .env завершилась с кодом 2 и WinError 11001, reports/report.md не создан. Контрольный запуск --structural-only в отдельный output/offline дал код 3 и три непустых файла MD/HTML/JSON. Паспорт: v1.4.0 (08f9956), structural_only, 0 вызовов, SHA-256 PDF совпал. В регрессии 47 passed, 1 failed (test_web_ui_server_endpoints_and_analysis_job, WinError 10013, localhost).
+
+Продолжение только A2: в output/a2_08f9956 выполнить команду основного запуска с путями reports/report.md и reports/report.json из обновлённого README. Проверить код 0 или 1, наличие трёх файлов, complete, положительное число ответов, версию без -dirty и SHA исходного PDF. При сетевой ошибке A2 остаётся открытым. A3 в этой проверке не запускался.
+

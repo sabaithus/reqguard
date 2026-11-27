@@ -15,7 +15,7 @@ Copy-Item .env.example .env
 Получите ключ в [Google AI Studio](https://aistudio.google.com/apikey). В локальном файле `.env` задайте `GEMINI_API_KEY` и `GEMINI_MODEL` — идентификатор модели, доступной вашему ключу. В конфигурации проекта выбран `gemini-3.6-flash`. Провайдеры OpenAI-совместимого API, Anthropic и Ollama также поддерживаются, примеры параметров приведены в `.env.example`. При облачном запуске текст документа передаётся выбранному провайдеру.
 
 ```powershell
-.\.venv\Scripts\python.exe main.py docs/requirements.pdf output/report.md --with-html --json output/report.json
+.\.venv\Scripts\python.exe main.py docs/requirements.pdf reports/report.md --with-html --json reports/report.json
 ```
 
 Второй аргумент задаёт путь к основному отчёту. В Linux/macOS используйте `.venv/bin/python`. Для локальной Studio выполните `python main.py --serve` в активированной среде. Открытие сохранённого отчёта показывает результат предыдущего прогона.
